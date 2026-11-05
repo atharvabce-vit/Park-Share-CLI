@@ -30,7 +30,9 @@ def host_menu():
     print("1. Add a Parking Spot")
     print("2. View My Listings")
     print("3. View All Spots")
-    print("4. Logout")
+    print("4. Search & Sort Spots")
+    print("5. My Earnings")
+    print("6. Logout")
     choice = ask_int("Choose an option: ", minimum=1)
     if choice == 1:
         spot_module.add_spot()
@@ -39,6 +41,10 @@ def host_menu():
     elif choice == 3:
         spot_module.show_spots()
     elif choice == 4:
+        spot_module.search_spots()
+    elif choice == 5:
+        booking_module.show_host_earnings()
+    elif choice == 6:
         auth_module.logout()
     else:
         print("Invalid option.")
@@ -50,8 +56,10 @@ def driver_menu():
     print("1. View Available Spots")
     print("2. Book a Spot")
     print("3. Release Spot (Checkout)")
-    print("4. My Bookings")
-    print("5. Logout")
+    print("4. Cancel a Booking")
+    print("5. My Bookings")
+    print("6. Search & Sort Spots")
+    print("7. Logout")
     choice = ask_int("Choose an option: ", minimum=1)
     if choice == 1:
         spot_module.show_spots(only_available=True)
@@ -60,8 +68,12 @@ def driver_menu():
     elif choice == 3:
         booking_module.release_spot()
     elif choice == 4:
-        booking_module.show_my_bookings()
+        booking_module.cancel_booking()
     elif choice == 5:
+        booking_module.show_my_bookings()
+    elif choice == 6:
+        spot_module.search_spots(only_available=True)
+    elif choice == 7:
         auth_module.logout()
     else:
         print("Invalid option.")

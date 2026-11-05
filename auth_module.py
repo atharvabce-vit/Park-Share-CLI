@@ -17,6 +17,10 @@ def register_user():
     if not password:
         print("Password cannot be empty.")
         return
+    confirm = ask_text("Confirm your password: ")
+    if confirm != password:
+        print("Passwords do not match.")
+        return
     role = ask_text("Enter role (Host or Driver): ").capitalize()
     if role not in ("Host", "Driver"):
         print("Role must be either Host or Driver.")

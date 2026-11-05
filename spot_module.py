@@ -56,3 +56,50 @@ def show_host_spots():
         return
     for spot in mine:
         print("Spot #" + str(spot.spot_id), "|", spot.location, "| Rs", spot.price_per_hour, "/hour | Slots left:", spot.slots_left(), "|", spot.status())
+
+
+def search_spots(only_available=False):
+    line()
+    print("Search & Sort Spots")
+    if not data_store.spots_db:
+        print("No parking spots have been listed yet.")
+        return
+
+    keyword = ask_text("Enter location keyword (leave blank for all): ").lower()
+    max_price_raw = ask_text("Enter maximum price per hour (leave blank for any): ")
+    max_price = None
+    if max_price_raw:
+        try:
+            max_price = float(max_price_raw)
+        except ValueError:
+            print("Invalid price entered, ignoring the price filter.")
+
+    print("Sort by: 1. Default  2. Price (low to high)  3. Slots left (high to low)")
+    sort_choice = ask_int("Choose a sort option: ", minimum=1)
+
+    results = []
+    for spot in data_store.spots_db:
+        if only_available and not spot.has_slots():
+            continue
+        if keyword and keyword not in spot.location.lower():
+            continue
+        if max_price is not None and spot.price_per_hour > max_price:
+            continue
+        results.append(spot)
+
+    if sort_choice == 2:
+        results.sort(key=lambda s: s.price_per_hour)
+    elif sort_choice == 3:
+        results.sort(key=lambda s: s.available_slots, reverse=True)
+
+    line()
+    print("ID | Location | Rs/hour | Slots Left | Status")
+    line()
+    if not results:
+        print("No spots match your search.")
+        line()
+        return
+    for spot in results:
+        print(spot.spot_id, "|", spot.location, "| Rs", spot.price_per_hour, "|", spot.slots_left(), "|", spot.status())
+    line()
+    print("Matches found:", len(results))
