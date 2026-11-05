@@ -42,3 +42,12 @@ def ask_yes_no(prompt):
         if raw in ("n", "no"):
             return False
         print("Please answer Y or N.")
+
+
+def ask_rating(prompt):
+    while True:
+        value = ask_int(prompt, minimum=1)
+        if value > 5:
+            print("Rating must be between 1 and 5.")
+            continue
+        return value

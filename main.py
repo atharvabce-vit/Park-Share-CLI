@@ -2,6 +2,7 @@ import data_store
 import auth_module
 import spot_module
 import booking_module
+import activity_module
 from utils_module import ask_int, line
 
 print("=== Welcome to ParkShare CLI ===")
@@ -31,8 +32,11 @@ def host_menu():
     print("2. View My Listings")
     print("3. View All Spots")
     print("4. Search & Sort Spots")
-    print("5. My Earnings")
-    print("6. Logout")
+    print("5. Edit My Spot")
+    print("6. Remove My Spot")
+    print("7. My Earnings")
+    print("8. Live Activity Feed")
+    print("9. Logout")
     choice = ask_int("Choose an option: ", minimum=1)
     if choice == 1:
         spot_module.add_spot()
@@ -43,8 +47,14 @@ def host_menu():
     elif choice == 4:
         spot_module.search_spots()
     elif choice == 5:
-        booking_module.show_host_earnings()
+        spot_module.edit_spot()
     elif choice == 6:
+        spot_module.remove_spot()
+    elif choice == 7:
+        booking_module.show_host_earnings()
+    elif choice == 8:
+        activity_module.show_activity()
+    elif choice == 9:
         auth_module.logout()
     else:
         print("Invalid option.")
@@ -59,7 +69,9 @@ def driver_menu():
     print("4. Cancel a Booking")
     print("5. My Bookings")
     print("6. Search & Sort Spots")
-    print("7. Logout")
+    print("7. Live Status")
+    print("8. Live Activity Feed")
+    print("9. Logout")
     choice = ask_int("Choose an option: ", minimum=1)
     if choice == 1:
         spot_module.show_spots(only_available=True)
@@ -74,6 +86,10 @@ def driver_menu():
     elif choice == 6:
         spot_module.search_spots(only_available=True)
     elif choice == 7:
+        booking_module.show_live_status()
+    elif choice == 8:
+        activity_module.show_activity()
+    elif choice == 9:
         auth_module.logout()
     else:
         print("Invalid option.")

@@ -27,6 +27,7 @@ def register_user():
         return
 
     data_store.users_db[username] = User(username, password, role)
+    data_store.log_event(username + " registered as a " + role)
     print("Registration successful! Please log in to continue.")
 
 
@@ -40,10 +41,12 @@ def login():
         print("Invalid username or password.")
         return
     data_store.current_user = user
+    data_store.log_event(user.username + " logged in")
     print("Login successful! Welcome,", user.username, "(" + user.role + ")")
 
 
 def logout():
     if data_store.current_user is not None:
+        data_store.log_event(data_store.current_user.username + " logged out")
         print("Goodbye,", data_store.current_user.username)
     data_store.current_user = None

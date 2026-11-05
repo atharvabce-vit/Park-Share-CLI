@@ -1,6 +1,10 @@
+from datetime import datetime
+
 users_db = {}
 spots_db = []
 bookings_db = []
+
+activity_log = []
 
 current_user = None
 
@@ -45,12 +49,34 @@ def active_bookings():
 def total_slots():
     count = 0
     for spot in spots_db:
-        count += spot.total_slots
+        if spot.is_active:
+            count += spot.total_slots
     return count
 
 
 def slots_left():
     count = 0
     for spot in spots_db:
-        count += spot.available_slots
+        if spot.is_active:
+            count += spot.available_slots
     return count
+
+
+def log_event(text):
+    activity_log.append((datetime.now(), text))
+
+
+def occupied_slots(spot_id):
+    used = set()
+    for booking in bookings_db:
+        if booking.spot_id == spot_id and booking.status == "Active" and booking.slot_number is not None:
+            used.add(booking.slot_number)
+    return used
+
+
+def next_free_slot(spot):
+    used = occupied_slots(spot.spot_id)
+    for number in range(1, spot.total_slots + 1):
+        if number not in used:
+            return number
+    return None
