@@ -1,43 +1,40 @@
-print("\n Initialize Application Data ")
+class User:
+    def __init__(self, username, password, role):
+        self.username = username
+        self.password = password
+        self.role = role
 
 
-print("\n[User Configuration]")
-user_username = input("Enter a username: ")
-user_role = input("Enter role (Host or Driver): ")
+class ParkingSpot:
+    def __init__(self, spot_id, location, price_per_hour, host_username, total_slots):
+        self.spot_id = spot_id
+        self.location = location
+        self.price_per_hour = price_per_hour
+        self.host_username = host_username
+        self.total_slots = total_slots
+        self.available_slots = total_slots
 
-current_user = {
-    "username": user_username,
-    "role": user_role
-}
+    def has_slots(self):
+        return self.available_slots > 0
 
-print("\n[Parking Spot Configuration]")
-spot_id_input = input("Enter a unique Spot ID (integer): ")
-spot_location = input("Enter location description: ")
-spot_price_input = input("Enter price per hour: ")
+    def slots_left(self):
+        return str(self.available_slots) + "/" + str(self.total_slots)
 
-parking_spot = {
-    "spot_id": int(spot_id_input),
-    "location": spot_location,
-    "price_per_hour": float(spot_price_input),
-    "host_username": user_username,
-    "is_available": True
-}
+    def status(self):
+        if self.has_slots():
+            return "Open"
+        return "Full"
 
-print("\n[Booking Configuration]")
-driver_name = input("Enter driver's username booking this spot: ")
-hours_input = input("Enter number of hours needed: ")
-booking_hours = int(hours_input)
 
-calculated_total_cost = parking_spot["price_per_hour"] * booking_hours
-
-booking_record = {
-    "spot_id": parking_spot["spot_id"],
-    "driver_username": driver_name,
-    "hours": booking_hours,
-    "total_cost": calculated_total_cost
-}
-
-print(" Summary of Captured Data ")
-print("User Model:", current_user)
-print("Spot Model:", parking_spot)
-print("Booking Model:", booking_record)
+class Booking:
+    def __init__(self, booking_id, spot_id, driver_username, planned_hours, price_per_hour, entry_time):
+        self.booking_id = booking_id
+        self.spot_id = spot_id
+        self.driver_username = driver_username
+        self.planned_hours = planned_hours
+        self.price_per_hour = price_per_hour
+        self.entry_time = entry_time
+        self.exit_time = None
+        self.billed_hours = None
+        self.final_cost = None
+        self.status = "Active"
