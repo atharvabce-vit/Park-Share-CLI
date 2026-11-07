@@ -1,17 +1,27 @@
 class User:
-    def __init__(self, username, password, role):
+    def __init__(self, username, password, role, full_name="", email="", phone="", vehicle_type="", vehicle_plate=""):
         self.username = username
         self.password = password
         self.role = role
+        self.full_name = full_name
+        self.email = email
+        self.phone = phone
+        self.vehicle_type = vehicle_type
+        self.vehicle_plate = vehicle_plate
 
 
 class ParkingSpot:
-    def __init__(self, spot_id, location, price_per_hour, host_username, total_slots):
+    def __init__(self, spot_id, location, price_per_hour, host_username, total_slots,
+                 description="", covered=False, ev_charging=False, vehicle_types=None):
         self.spot_id = spot_id
         self.location = location
         self.price_per_hour = price_per_hour
         self.host_username = host_username
         self.total_slots = total_slots
+        self.description = description
+        self.covered = covered
+        self.ev_charging = ev_charging
+        self.vehicle_types = vehicle_types or ["Car", "Motorcycle", "SUV", "Van"]
         self.available_slots = total_slots
         self.ratings = []
         self.is_active = True
