@@ -6,17 +6,30 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 
 - **Driver and host accounts:** Choose an account type and create a profile. Drivers can add their vehicle type and optional plate; hosts can publish and manage parking listings.
 - **Safer signup:** Password confirmation, password-strength guidance, profile validation, CSRF-protected forms, and hashed passwords.
-- **Find a space:** Choose a search point on an interactive Leaflet map, find nearby listings by radius, and see compatible vehicles, distance, and a 0–100 recommendation score based on distance (35%), availability (25%), relative price (20%), and rating (20%). The registered driver vehicle is selected by default; listings that do not support it are excluded.
+- **Find a space:** Select an area on an interactive Leaflet map, search a place name, or optionally use browser location. Filter geo-tagged spaces by 1, 3, 5, 10, 25, or 50 km, time, price, amenities, and vehicle. See map pins, distance, compatible vehicles, and a 0–100 recommendation score.
 - **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
-- **Host tools:** Add, edit, and remove listings; upload JPG, PNG, or WebP photos; open map directions; see active vehicles and earnings/occupancy trends.
-- **Account tools:** Edit your profile, delete your account, and request a time-limited password-reset link by email.
+- **Host tools:** Pin each parking entrance on the map, add/edit/remove listings, upload JPG/PNG/WebP photos, and see active bookings and earnings/occupancy trends.
+- **Account tools:** Edit your profile, delete your account (after active bookings are resolved), and request a time-limited password-reset link by email.
 - **Notifications:** Hosts receive in-app updates when drivers book, cancel, or complete a stay.
 - **Activity feed:** Review recent ParkShare events.
 - **CLI remains available:** The browser interface is an addition; the terminal app still starts with `main.py`.
 
-Bookings and promo codes simulate a transaction; the project does not process real payments.
-Data is stored in SQLite. Listing photos are stored locally under `static/uploads`.
-New web listings need a map pin so drivers can find them nearby. Leaflet map tiles use OpenStreetMap; place search uses Nominatim. Those map services require an internet connection. Browser location is optional and requires permission.
+### Map search and recommendations
+
+1. A host signs in, opens **My listings**, enters the listing's location, and selects **Find location on map** or clicks the map to place the pin. The pin can be dragged to the parking entrance. A pin is required to publish a new web listing.
+2. A driver opens **Find parking**, chooses a point by clicking/searching the map or selects **Use my location** and grants browser permission. Pick a radius and select **Search this area**. A driver with a registered vehicle sees compatible spaces by default; choose **Any vehicle** to include all vehicle types.
+3. Matching listings appear as both cards and map markers. The recommended sort calculates a score from distance (35%), available capacity for the selected time window (25%), relative hourly price among the filtered results (20%), and rating (20%). Unrated listings receive a neutral rating component. Use the other sort options to sort by price, rating, or availability instead. This is a ParkShare ranking, not a guarantee of suitability.
+
+ParkShare stores the selected latitude and longitude in SQLite; it does not automatically infer exact coordinates from the typed location. Map tiles come from OpenStreetMap and place-name search uses Nominatim, so map display and place search need internet access. Browser geolocation is optional, requires permission, and generally needs a secure context (localhost is allowed). The browser sends the typed place-name query to Nominatim when **Find location on map** is used. If there are no active host listings, the driver page explains that a host must publish a space first.
+
+### Bookings, accounts, and host analytics
+
+- Booking search availability is calculated for the selected start time and duration. A slot cannot be double-booked during overlapping reservation windows. A reservation is capped at 168 hours and can start up to 30 days in advance.
+- Checkout, ratings, discounts, and earnings are demo features; ParkShare does not process real payments.
+- Listing photos are stored locally in `static/uploads` (JPG, PNG, or WebP, maximum 5 MB). Listing coordinates, accounts, ratings, bookings, activity, and notifications are stored in the SQLite database.
+- Hosts receive in-app notifications for booking, cancellation, and checkout events. Profile changes and account deletion are available from **Profile**; account deletion requires the current password and no active bookings.
+- Password reset uses single-use links that expire after 30 minutes. Email delivery only works after an SMTP provider is configured below.
+- Host **Earnings** displays all-time revenue, revenue by listing, the last six calendar months of completed earnings, and estimated 30-day occupancy (reserved space-hours divided by the capacity of live listings).
 
 ## Run the browser app
 
@@ -28,22 +41,23 @@ Requires Python and pip.
    python -m pip install -r requirements.txt
    ```
 
-2. Start the local web server (default port 5000):
+2. Start the local web server (default port 5000). To keep it separate from another app on port 5000, use port 5001:
 
    ```powershell
+   $env:PARKSHARE_PORT = "5001"
    python web_app.py
    ```
 
-3. Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your browser and choose **Create account**.
+3. Open [http://127.0.0.1:5001](http://127.0.0.1:5001) in your browser and choose **Create account**. If you did not set `PARKSHARE_PORT`, use [http://127.0.0.1:5000](http://127.0.0.1:5000).
 
-Choose another local port if another app already uses 5000:
+Choose another available port if needed:
 
 ```powershell
-$env:PARKSHARE_PORT = "5001"
+$env:PARKSHARE_PORT = "5002"
 python web_app.py
 ```
 
-`PARKSHARE_HOST` can also change the bind address. Set `PARKSHARE_PUBLIC_URL` to the browser-facing base URL if password reset links should use a different host or port. `PARKSHARE_DATABASE` selects a different SQLite file; by default the database is `instance/parkshare.sqlite3`.
+`PARKSHARE_HOST` changes the bind address. `PARKSHARE_PUBLIC_URL` sets the public base URL used in password-reset links. `PARKSHARE_DATABASE` selects the SQLite file; by default it is `instance/parkshare.sqlite3`. Set environment variables in the same PowerShell window before starting the server.
 
 Signup lets you choose **Find parking** (Driver) or **Share my space** (Host). Driver profiles ask for a vehicle type so the app can filter out incompatible parking spaces. Passwords must be at least eight characters and include a number.
 
@@ -53,7 +67,7 @@ To use a stable signing key across restarts, set the `PARKSHARE_SECRET_KEY` envi
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Password-reset email requires an SMTP provider. Set `PARKSHARE_SMTP_HOST`, `PARKSHARE_SMTP_FROM`, and optionally `PARKSHARE_SMTP_PORT` (default `587`), `PARKSHARE_SMTP_USER`, and `PARKSHARE_SMTP_PASSWORD`. Reset links expire after 30 minutes and can only be used once.
+Password-reset email requires a reachable SMTP provider. Set `PARKSHARE_SMTP_HOST` and `PARKSHARE_SMTP_FROM`, plus `PARKSHARE_SMTP_USER` and `PARKSHARE_SMTP_PASSWORD` when the provider requires authentication. `PARKSHARE_SMTP_PORT` defaults to `587` with STARTTLS. Do not commit credentials. Reset links expire after 30 minutes and can only be used once. Without SMTP configuration, reset requests show a generic confirmation, but no email is delivered.
 
 The built-in Flask development server is intended for local demos, not production deployment.
 
@@ -73,7 +87,7 @@ python -m unittest discover -s tests -v
 
 ## Important limitations
 
-The SQLite database and uploaded photos are local to this installation; back them up together. The built-in Flask server is intended for local demos, not production deployment. Configure a production WSGI server, HTTPS, secure secrets, backups, and a real payment provider before handling real users or payments.
+The SQLite database and uploaded photos are local to this installation; back them up together. The built-in Flask server is intended for local demos, not production deployment. Configure a production WSGI server, HTTPS, secure secrets, backups, and a real payment provider before handling real users or payments. Leaflet assets, OpenStreetMap tiles, and Nominatim place search depend on third-party internet services and their availability/usage policies.
 
 ## Project layout
 
