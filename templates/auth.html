@@ -26,7 +26,7 @@
         </div>
         <div class="driver-fields">
           <div class="field-grid">
-            <label class="field">Vehicle type<select name="vehicle_type" required><option value="">Choose your vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if form_data.get("vehicle_type") == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
+            <label class="field">Vehicle type<select name="vehicle_type"><option value="">Choose your vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if form_data.get("vehicle_type") == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
             <label class="field">Vehicle plate <span class="optional">optional</span><input name="vehicle_plate" value="{{ form_data.get('vehicle_plate', '') }}" maxlength="20" placeholder="e.g. MH 01 AB 1234"></label>
           </div>
         </div>

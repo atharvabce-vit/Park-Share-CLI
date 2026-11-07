@@ -1,4 +1,5 @@
 import hmac
+import math
 import os
 import secrets
 import threading
@@ -181,7 +182,7 @@ def create_app(test_config=None):
         if max_price_raw:
             try:
                 max_price = float(max_price_raw)
-                if max_price < 0:
+                if not math.isfinite(max_price) or max_price < 0:
                     raise ValueError()
             except ValueError:
                 flash("Maximum price must be a positive number.", "error")
@@ -233,8 +234,8 @@ def create_app(test_config=None):
             except ValueError:
                 flash("Enter a valid hourly price and number of spaces.", "error")
                 return redirect(url_for("host_spots"))
-            if not location or price < 1 or slots < 1:
-                flash("Location is required, price must be at least ₹1, and spaces must be at least 1.", "error")
+            if not location or not math.isfinite(price) or price < 1 or slots < 1 or slots > 100:
+                flash("Location is required, price must be at least ₹1, and spaces must be between 1 and 100.", "error")
                 return redirect(url_for("host_spots"))
             types = [item for item in VEHICLE_TYPES if item in request.form.getlist("vehicle_types")]
             if not types:
@@ -281,7 +282,7 @@ def create_app(test_config=None):
             flash("Enter a valid hourly price.", "error")
             return redirect(url_for("host_spots"))
         types = [item for item in VEHICLE_TYPES if item in request.form.getlist("vehicle_types")]
-        if not location or price < 1 or not types:
+        if not location or not math.isfinite(price) or price < 1 or not types:
             flash("A location, price of at least ₹1, and one vehicle type are required.", "error")
             return redirect(url_for("host_spots"))
         spot.location = location

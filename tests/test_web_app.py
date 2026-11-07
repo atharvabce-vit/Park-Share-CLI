@@ -2,6 +2,7 @@ import re
 import unittest
 
 import data_store
+from werkzeug.security import check_password_hash
 from web_app import create_app
 
 
@@ -41,7 +42,7 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         user = data_store.users_db["driver_one"]
         self.assertNotEqual(user.password, "securepass1")
-        self.assertTrue(user.password.startswith("scrypt:"))
+        self.assertTrue(check_password_hash(user.password, "securepass1"))
         self.assertEqual(user.full_name, "Driver_One User")
         self.assertEqual(user.vehicle_plate, "MH01AB1234")
         self.assertIn(b"Welcome", response.data)
@@ -89,6 +90,23 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertTrue(spot.ev_charging)
         self.assertEqual(spot.vehicle_types, ["Car", "SUV"])
 
+        host_page = host_client.get("/host/spots")
+        response = host_client.post(
+            "/host/spots/" + str(spot.spot_id) + "/edit",
+            data={
+                "csrf_token": self.csrf(host_page),
+                "location": "Central Mumbai",
+                "description": "Updated directions for the entrance",
+                "price_per_hour": "75",
+                "vehicle_types": ["Car", "SUV"],
+                "covered": "on",
+                "ev_charging": "on",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(spot.description, "Updated directions for the entrance")
+
         driver_client = self.app.test_client()
         self.register(driver_client, "driver_two")
         browse = driver_client.get("/spots?covered=1&ev_charging=1&vehicle_type=Car")
@@ -99,6 +117,15 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         booking = data_store.bookings_db[0]
         self.assertEqual(spot.available_slots, 1)
+
+        host_page = host_client.get("/host/spots")
+        response = host_client.post(
+            "/host/spots/" + str(spot.spot_id) + "/remove",
+            data={"csrf_token": self.csrf(host_page)},
+            follow_redirects=True,
+        )
+        self.assertIn(b"cannot be removed", response.data)
+        self.assertTrue(spot.is_active)
 
         booking_page = driver_client.get("/bookings")
         response = driver_client.post(
