@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+
 class User:
     def __init__(self, username, password, role, full_name="", email="", phone="", vehicle_type="", vehicle_plate=""):
         self.username = username
@@ -12,7 +15,8 @@ class User:
 
 class ParkingSpot:
     def __init__(self, spot_id, location, price_per_hour, host_username, total_slots,
-                 description="", covered=False, ev_charging=False, vehicle_types=None):
+                 description="", covered=False, ev_charging=False, vehicle_types=None,
+                 photo=""):
         self.spot_id = spot_id
         self.location = location
         self.price_per_hour = price_per_hour
@@ -25,6 +29,7 @@ class ParkingSpot:
         self.available_slots = total_slots
         self.ratings = []
         self.is_active = True
+        self.photo = photo
 
     def has_slots(self):
         return self.available_slots > 0
@@ -47,13 +52,16 @@ class ParkingSpot:
 
 
 class Booking:
-    def __init__(self, booking_id, spot_id, driver_username, planned_hours, price_per_hour, entry_time, slot_number=None):
+    def __init__(self, booking_id, spot_id, driver_username, planned_hours, price_per_hour,
+                 entry_time, slot_number=None, start_time=None, end_time=None):
         self.booking_id = booking_id
         self.spot_id = spot_id
         self.driver_username = driver_username
         self.planned_hours = planned_hours
         self.price_per_hour = price_per_hour
         self.entry_time = entry_time
+        self.start_time = start_time or entry_time
+        self.end_time = end_time or (self.start_time + timedelta(hours=planned_hours))
         self.slot_number = slot_number
         self.exit_time = None
         self.billed_hours = None

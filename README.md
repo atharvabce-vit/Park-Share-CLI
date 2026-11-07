@@ -7,12 +7,15 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Driver and host accounts:** Choose an account type and create a profile. Drivers can add their vehicle type and optional plate; hosts can publish and manage parking listings.
 - **Safer signup:** Password confirmation, password-strength guidance, profile validation, CSRF-protected forms, and hashed passwords.
 - **Find a space:** Search by location, maximum hourly price, supported vehicle, covered parking, or EV charging; sort by price, rating, or availability.
-- **Manage bookings:** Assign an available slot, see booking history, cancel an active booking, or check out with an optional promo code and rating.
-- **Host tools:** Add, edit, and remove listings; see active vehicles and completed-booking earnings.
+- **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
+- **Host tools:** Add, edit, and remove listings; upload JPG, PNG, or WebP photos; open map directions; see active vehicles and earnings/occupancy trends.
+- **Account tools:** Edit your profile, delete your account, and request a time-limited password-reset link by email.
+- **Notifications:** Hosts receive in-app updates when drivers book, cancel, or complete a stay.
 - **Activity feed:** Review recent ParkShare events.
 - **CLI remains available:** The browser interface is an addition; the terminal app still starts with `main.py`.
 
 Bookings and promo codes simulate a transaction; the project does not process real payments.
+Data is stored in SQLite. Listing photos are stored locally under `static/uploads`.
 
 ## Run the browser app
 
@@ -24,13 +27,22 @@ Requires Python and pip.
    python -m pip install -r requirements.txt
    ```
 
-2. Start the local web server:
+2. Start the local web server (default port 5000):
 
    ```powershell
    python web_app.py
    ```
 
 3. Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your browser and choose **Create account**.
+
+Choose another local port if another app already uses 5000:
+
+```powershell
+$env:PARKSHARE_PORT = "5001"
+python web_app.py
+```
+
+`PARKSHARE_HOST` can also change the bind address. Set `PARKSHARE_PUBLIC_URL` to the browser-facing base URL if password reset links should use a different host or port. `PARKSHARE_DATABASE` selects a different SQLite file; by default the database is `instance/parkshare.sqlite3`.
 
 Signup lets you choose **Find parking** (Driver) or **Share my space** (Host). Driver profiles ask for a vehicle type so the app can filter out incompatible parking spaces. Passwords must be at least eight characters and include a number.
 
@@ -39,6 +51,8 @@ To use a stable signing key across restarts, set the `PARKSHARE_SECRET_KEY` envi
 ```powershell
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
+
+Password-reset email requires an SMTP provider. Set `PARKSHARE_SMTP_HOST`, `PARKSHARE_SMTP_FROM`, and optionally `PARKSHARE_SMTP_PORT` (default `587`), `PARKSHARE_SMTP_USER`, and `PARKSHARE_SMTP_PASSWORD`. Reset links expire after 30 minutes and can only be used once.
 
 The built-in Flask development server is intended for local demos, not production deployment.
 
@@ -56,9 +70,9 @@ CLI registration also requests a name and account type. Drivers provide their ve
 python -m unittest discover -s tests -v
 ```
 
-## Important limitation
+## Important limitations
 
-Users, listings, bookings, activity, and ratings are stored in memory. They are cleared when the Python process stops, so this version is a local/demo application rather than a persistent multi-user service. A database and production deployment setup would be the next steps before real-world use.
+The SQLite database and uploaded photos are local to this installation; back them up together. The built-in Flask server is intended for local demos, not production deployment. Configure a production WSGI server, HTTPS, secure secrets, backups, and a real payment provider before handling real users or payments.
 
 ## Project layout
 
@@ -67,6 +81,6 @@ Users, listings, bookings, activity, and ratings are stored in memory. They are 
 - `main.py` — terminal application entry point.
 - `auth_module.py` — shared account creation and password verification.
 - `models.py` — user, parking spot, and booking models.
-- `data_store.py` — in-memory application state.
+- `data_store.py` — SQLite-backed application state shared by the CLI and web app.
 - `spot_module.py`, `booking_module.py`, `billing_module.py` — CLI spot and booking flows and shared billing rules.
 - `tests/test_web_app.py` — browser application flow tests.

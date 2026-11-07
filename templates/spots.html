@@ -10,22 +10,26 @@
   <label class="field">Max price / hour<input type="number" min="0" step="0.5" name="max_price" value="{{ filters.max_price }}" placeholder="Any price"></label>
   <label class="field">Vehicle type<select name="vehicle_type"><option value="">Any vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if filters.vehicle_type == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
   <label class="field">Sort by<select name="sort"><option value="recommended" {% if filters.sort == "recommended" %}selected{% endif %}>Recommended</option><option value="price" {% if filters.sort == "price" %}selected{% endif %}>Price: low to high</option><option value="rating" {% if filters.sort == "rating" %}selected{% endif %}>Top rated</option><option value="availability" {% if filters.sort == "availability" %}selected{% endif %}>Most spaces</option></select></label>
+  <label class="field">Start time<input type="datetime-local" name="start_time" min="{{ filters.minimum_start }}" value="{{ filters.start_time }}"></label>
+  <label class="field">Duration (hours)<input type="number" name="hours" min="1" max="168" value="{{ filters.hours }}"></label>
   <div class="filter-options"><label><input type="checkbox" name="covered" value="1" {% if filters.covered %}checked{% endif %}> Covered</label><label><input type="checkbox" name="ev_charging" value="1" {% if filters.ev_charging %}checked{% endif %}> EV charging</label><button class="button primary" type="submit">Apply filters</button></div>
 </form>
 {% if spots %}
 <section class="spot-grid">
   {% for spot in spots %}
   <article class="spot-card">
-    <div class="spot-visual"><span class="spot-visual-icon">⌖</span><span class="badge available">{{ spot.available_slots }} / {{ spot.total_slots }} open</span></div>
+    <div class="spot-visual">{% if spot.photo %}<img src="{{ url_for('static', filename=spot.photo) }}" alt="Parking at {{ spot.location }}">{% else %}<span class="spot-visual-icon">⌖</span>{% endif %}<span class="badge available">{{ availability[spot.spot_id] }} / {{ spot.total_slots }} open for this time</span></div>
     <div class="spot-body">
       <div class="spot-title"><h2>{{ spot.location }}</h2><span class="rating">★ {{ spot.average_rating() if spot.average_rating() is not none else "New" }}</span></div>
       <p>{{ spot.description or "A convenient local parking space, ready when you are." }}</p>
+      <a class="text-link" href="{{ map_url(spot.location) }}" target="_blank" rel="noopener noreferrer">Open location in OpenStreetMap →</a>
       <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
       <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>Host · {{ spot.host_username }}</span></div>
       {% if signed_in_user.role == "Driver" %}
       <form method="post" action="{{ url_for('create_booking') }}" class="book-row">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="spot_id" value="{{ spot.spot_id }}">
-        <label class="sr-only" for="hours-{{ spot.spot_id }}">Hours</label><input id="hours-{{ spot.spot_id }}" name="hours" type="number" min="1" max="168" value="1" required>
+        <label class="sr-only" for="start-{{ spot.spot_id }}">Start time</label><input id="start-{{ spot.spot_id }}" name="start_time" type="datetime-local" min="{{ filters.minimum_start }}" value="{{ filters.start_time }}" required>
+        <label class="sr-only" for="hours-{{ spot.spot_id }}">Hours</label><input id="hours-{{ spot.spot_id }}" name="hours" type="number" min="1" max="168" value="{{ filters.hours }}" required>
         <button class="button primary" type="submit">Book this spot</button>
       </form>
       {% endif %}

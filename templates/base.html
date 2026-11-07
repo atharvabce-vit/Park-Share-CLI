@@ -15,6 +15,8 @@
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
         <a href="{{ url_for('spots') }}">Find parking</a>
         <a href="{{ url_for('bookings') }}">Bookings</a>
+        <a href="{{ url_for('notifications_page') }}">Notifications{% if unread_notifications %} ({{ unread_notifications }}){% endif %}</a>
+        <a href="{{ url_for('profile') }}">Profile</a>
         {% if signed_in_user.role == "Host" %}
           <a href="{{ url_for('host_spots') }}">My listings</a>
           <a href="{{ url_for('earnings') }}">Earnings</a>

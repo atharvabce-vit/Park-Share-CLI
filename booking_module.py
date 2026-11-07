@@ -1,7 +1,7 @@
 import data_store
 import billing_module
 from models import Booking
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils_module import ask_int, ask_text, ask_yes_no, ask_rating, line
 
 
@@ -19,13 +19,13 @@ def book_spot():
 
     available = []
     for spot in data_store.spots_db:
-        if spot.is_active and spot.has_slots():
+        if spot.is_active:
             available.append(spot)
     if not available:
-        print("Sorry, no spots are available right now.")
+        print("Sorry, no spots have been listed.")
         return
 
-    print("Available spots (with slots left):")
+    print("Listed spots (availability depends on your selected time):")
     for spot in available:
         print("Spot #" + str(spot.spot_id), "|", spot.location, "| Rs", spot.price_per_hour, "/hour | Slots left:", spot.slots_left())
 
@@ -34,16 +34,33 @@ def book_spot():
     if spot is None or not spot.is_active:
         print("That spot does not exist.")
         return
-    if not spot.has_slots():
-        print("That spot is full. Slots left:", spot.slots_left())
-        return
-
     hours = ask_int("Enter duration in hours: ")
+    if hours > 168:
+        print("Booking duration cannot exceed 168 hours.")
+        return
+    requested_start = ask_text("Start time YYYY-MM-DD HH:MM (leave blank to start now): ")
+    if requested_start:
+        try:
+            start_time = datetime.strptime(requested_start, "%Y-%m-%d %H:%M")
+        except ValueError:
+            print("Enter a valid local date and time in YYYY-MM-DD HH:MM format.")
+            return
+    else:
+        start_time = datetime.now()
+    if start_time < datetime.now() - timedelta(minutes=1) or start_time > datetime.now() + timedelta(days=30):
+        print("Choose a start time within the next 30 days.")
+        return
+    end_time = start_time + timedelta(hours=hours)
+    slot_number = data_store.next_free_slot(spot, start_time, end_time)
+    if slot_number is None:
+        print("No space is available for that time range.")
+        return
     estimate = billing_module.estimate_cost(spot.price_per_hour, hours)
 
     line()
     print("Price per hour : Rs", spot.price_per_hour)
     print("Duration       :", hours, "hour(s)")
+    print("Reserved from  :", start_time.strftime("%Y-%m-%d %H:%M"))
     print("Estimated cost : Rs", estimate, "(final bill is based on actual parked time)")
     line()
 
@@ -51,10 +68,12 @@ def book_spot():
         print("Booking cancelled.")
         return
 
-    slot_number = data_store.next_free_slot(spot)
-    spot.available_slots -= 1
-    booking = Booking(data_store.next_booking_id(), spot.spot_id, user.username, hours, spot.price_per_hour, datetime.now(), slot_number)
+    booking = Booking(
+        data_store.next_booking_id(), spot.spot_id, user.username, hours,
+        spot.price_per_hour, start_time, slot_number, start_time, end_time,
+    )
     data_store.bookings_db.append(booking)
+    data_store.refresh_availability(spot)
     data_store.log_event(user.username + " booked spot #" + str(spot.spot_id) + " (slot " + str(slot_number) + ")")
 
     print("Booking confirmed! Your Booking ID is", booking.booking_id)
@@ -78,7 +97,11 @@ def release_spot():
     print("Your active bookings:")
     for booking in mine:
         spot = data_store.find_spot(booking.spot_id)
-        print("Booking #" + str(booking.booking_id), "| Spot #" + str(booking.spot_id), "|", spot.location, "| Slot", booking.slot_number, "| Parked:", elapsed_text(booking.entry_time))
+        if booking.start_time > datetime.now():
+            status = "Reserved for " + booking.start_time.strftime("%Y-%m-%d %H:%M")
+        else:
+            status = "Parked: " + elapsed_text(booking.entry_time)
+        print("Booking #" + str(booking.booking_id), "| Spot #" + str(booking.spot_id), "|", spot.location, "| Slot", booking.slot_number, "|", status)
 
     booking_id = ask_int("Enter Booking ID to release: ")
     booking = data_store.find_booking(booking_id)
@@ -87,6 +110,9 @@ def release_spot():
         return
 
     spot = data_store.find_spot(booking.spot_id)
+    if booking.start_time and datetime.now() < booking.start_time:
+        print("You cannot check out before your booking starts.")
+        return
     exit_time = datetime.now()
     amount, hours, overtime = billing_module.final_cost(spot.price_per_hour, booking.entry_time, exit_time, booking.planned_hours)
 
@@ -113,7 +139,7 @@ def release_spot():
     booking.final_cost = final_amount
     booking.status = "Completed"
 
-    spot.available_slots += 1
+    data_store.refresh_availability(spot)
     data_store.log_event(user.username + " released spot #" + str(spot.spot_id) + " | Rs " + str(final_amount))
 
     line()
@@ -149,7 +175,11 @@ def cancel_booking():
     print("Your active bookings:")
     for booking in mine:
         spot = data_store.find_spot(booking.spot_id)
-        print("Booking #" + str(booking.booking_id), "| Spot #" + str(booking.spot_id), "|", spot.location, "| Slot", booking.slot_number, "| Parked:", elapsed_text(booking.entry_time))
+        if booking.start_time > datetime.now():
+            status = "Reserved for " + booking.start_time.strftime("%Y-%m-%d %H:%M")
+        else:
+            status = "Parked: " + elapsed_text(booking.entry_time)
+        print("Booking #" + str(booking.booking_id), "| Spot #" + str(booking.spot_id), "|", spot.location, "| Slot", booking.slot_number, "|", status)
 
     booking_id = ask_int("Enter Booking ID to cancel: ")
     booking = data_store.find_booking(booking_id)
@@ -163,7 +193,7 @@ def cancel_booking():
 
     spot = data_store.find_spot(booking.spot_id)
     booking.status = "Cancelled"
-    spot.available_slots += 1
+    data_store.refresh_availability(spot)
     data_store.log_event(user.username + " cancelled booking #" + str(booking.booking_id))
 
     print("Booking #" + str(booking.booking_id), "cancelled. No charge applied.")

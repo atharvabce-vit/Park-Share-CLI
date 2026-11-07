@@ -8,7 +8,7 @@
     {% set spot = find_spot(booking.spot_id) %}
     <article class="booking-card">
       <div class="booking-head"><div><span class="step-tag">BOOKING #{{ booking.booking_id }}</span><h2>{{ spot.location }}</h2></div><span class="badge {{ booking.status|lower }}">{{ booking.status }}</span></div>
-      <div class="booking-meta"><span>Space #{{ booking.slot_number }}</span><span>Planned {{ booking.planned_hours }} hour{% if booking.planned_hours != 1 %}s{% endif %}</span><span>₹{{ "%.2f"|format(booking.price_per_hour) }} / hour</span><span>{{ booking.entry_time.strftime("%d %b %Y, %I:%M %p") }}</span></div>
+      <div class="booking-meta"><span>Space #{{ booking.slot_number }}</span><span>{{ booking.planned_hours }} hour{% if booking.planned_hours != 1 %}s{% endif %}</span><span>₹{{ "%.2f"|format(booking.price_per_hour) }} / hour</span><span>{{ (booking.start_time or booking.entry_time).strftime("%d %b %Y, %I:%M %p") }} – {{ booking.end_time.strftime("%I:%M %p") if booking.end_time else "" }}</span></div>
       {% if booking.status == "Active" and signed_in_user.role == "Driver" %}
       <div class="booking-actions">
         <form method="post" action="{{ url_for('checkout', booking_id=booking.booking_id) }}" class="checkout-form">

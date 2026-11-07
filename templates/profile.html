@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Your profile{% endblock %}
+{% block content %}
+<section class="page-heading"><div><span class="eyebrow">ACCOUNT SETTINGS</span><h1>Your profile.</h1><p>Keep your contact and vehicle details up to date.</p></div></section>
+<section class="form-panel profile-panel">
+  <form method="post" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-grid">
+      <label class="field full">Full name<input name="full_name" value="{{ signed_in_user.full_name }}" required maxlength="80"></label>
+      <label class="field">Email address<input name="email" type="email" value="{{ signed_in_user.email }}" maxlength="254"></label>
+      <label class="field">Phone number<input name="phone" type="tel" value="{{ signed_in_user.phone }}" maxlength="30"></label>
+      {% if signed_in_user.role == "Driver" %}
+      <label class="field">Vehicle type<select name="vehicle_type">{% for kind in vehicle_types %}<option value="{{ kind }}" {% if signed_in_user.vehicle_type == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
+      <label class="field">Vehicle plate<input name="vehicle_plate" value="{{ signed_in_user.vehicle_plate }}" maxlength="20"></label>
+      {% endif %}
+    </div>
+    <button class="button primary" type="submit">Save profile</button>
+  </form>
+</section>
+<section class="form-panel danger-panel">
+  <h2>Delete your account</h2>
+  <p>This permanently removes your login and contact details, closes your listings, and anonymizes your booking history. Active bookings must be cancelled or completed first.</p>
+  <form method="post" action="{{ url_for('delete_account') }}" onsubmit="return confirm('Permanently delete your account? This cannot be undone.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="field">Current password<input name="current_password" type="password" autocomplete="current-password" required></label>
+    <button class="button danger-outline" type="submit">Delete my account</button>
+  </form>
+</section>
+{% endblock %}

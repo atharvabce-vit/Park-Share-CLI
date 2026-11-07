@@ -3,6 +3,17 @@
 {% block content %}
 <section class="page-heading"><div><span class="eyebrow">HOST OVERVIEW</span><h1>Your earnings.</h1><p>Completed stays and revenue from your spaces.</p></div></section>
 <section class="earnings-hero"><div><span>ALL-TIME EARNINGS</span><strong>₹{{ "%.2f"|format(total) }}</strong><small>{{ completed_count }} completed booking{% if completed_count != 1 %}s{% endif %}</small></div><span class="earnings-symbol">₹</span></section>
+<section class="stats-grid analytics-grid">
+  <article class="stat-card"><span>30-day occupancy</span><strong>{{ occupancy }}%</strong><small>Based on your active listings' available space-hours</small></article>
+  <article class="stat-card"><span>Monthly earnings</span><strong>Last 6 months</strong><small>Revenue recorded at checkout</small></article>
+</section>
+<section class="simple-list earnings-chart" aria-label="Monthly earnings for the last six months">
+  {% set chart_max = monthly_earnings|max if monthly_earnings|max > 0 else 1 %}
+  {% for label in month_labels %}
+    {% set amount = monthly_earnings[loop.index0] %}
+    <div class="list-row"><span>{{ label }}</span><div class="earnings-bar-track"><span class="earnings-bar" style="width: {{ (amount / chart_max * 100)|round|int }}%"></span></div><strong>₹{{ "%.2f"|format(amount) }}</strong></div>
+  {% endfor %}
+</section>
 <section class="section-heading"><div><span class="eyebrow">BY PARKING SPACE</span><h2>Listing performance</h2></div></section>
 <section class="simple-list">
   {% for spot_id, amount in totals.items() %}

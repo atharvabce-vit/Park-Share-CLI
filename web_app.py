@@ -1,21 +1,109 @@
 import hmac
+import hashlib
 import math
 import os
+import re
 import secrets
+import smtplib
 import threading
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
+from email.message import EmailMessage
 from functools import wraps
+from pathlib import Path
+from urllib.parse import quote
 
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, current_app, flash, redirect, render_template, request, session, url_for
 
 import auth_module
 import billing_module
 import data_store
 from models import ParkingSpot, Booking
+from werkzeug.security import generate_password_hash
 
 
 VEHICLE_TYPES = ("Car", "Motorcycle", "SUV", "Van")
 booking_lock = threading.RLock()
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
+
+
+def _default_start_time():
+    candidate = datetime.now() + timedelta(minutes=5)
+    minute = ((candidate.minute + 4) // 5) * 5
+    if minute == 60:
+        candidate = candidate.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else:
+        candidate = candidate.replace(minute=minute, second=0, microsecond=0)
+    return candidate
+
+
+def _parse_start_time(raw, default=None):
+    if not raw:
+        return default or datetime.now()
+    try:
+        return datetime.strptime(raw, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        raise ValueError("Choose a valid booking start date and time.")
+
+
+def _valid_password(password):
+    return len(password) >= 8 and any(character.isdigit() for character in password)
+
+
+def _save_photo(upload):
+    if upload is None or not upload.filename:
+        return ""
+    original_name = upload.filename.lower()
+    extension = Path(original_name).suffix
+    contents = upload.stream.read(MAX_PHOTO_BYTES + 1)
+    upload.stream.seek(0)
+    if len(contents) > MAX_PHOTO_BYTES:
+        raise ValueError("Listing photos must be 5 MB or smaller.")
+    valid_signatures = {
+        ".jpg": contents.startswith(b"\xff\xd8\xff"),
+        ".jpeg": contents.startswith(b"\xff\xd8\xff"),
+        ".png": contents.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".webp": contents.startswith(b"RIFF") and contents[8:12] == b"WEBP",
+    }
+    if not valid_signatures.get(extension, False):
+        raise ValueError("Upload a valid JPG, PNG, or WebP image.")
+    filename = uuid.uuid4().hex + extension
+    directory = Path(current_app.config["UPLOAD_FOLDER"])
+    directory.mkdir(parents=True, exist_ok=True)
+    upload.save(str(directory / filename))
+    return "uploads/" + filename
+
+
+def _delete_photo(photo):
+    if not photo or not photo.startswith("uploads/"):
+        return
+    path = (Path(current_app.static_folder) / photo).resolve()
+    uploads = Path(current_app.config["UPLOAD_FOLDER"]).resolve()
+    if path.parent == uploads and path.is_file():
+        path.unlink()
+
+
+def _send_password_reset(recipient, reset_url):
+    host = os.environ.get("PARKSHARE_SMTP_HOST", "")
+    sender = os.environ.get("PARKSHARE_SMTP_FROM", "")
+    if not host or not sender:
+        raise RuntimeError("Password-reset email is not configured.")
+    message = EmailMessage()
+    message["Subject"] = "Reset your ParkShare password"
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(
+        "Use this link within 30 minutes to reset your ParkShare password:\n\n"
+        + reset_url + "\n\nIf you did not request this, you can ignore this message."
+    )
+    port = int(os.environ.get("PARKSHARE_SMTP_PORT", "587"))
+    with smtplib.SMTP(host, port, timeout=10) as smtp:
+        smtp.starttls()
+        username = os.environ.get("PARKSHARE_SMTP_USER", "")
+        password = os.environ.get("PARKSHARE_SMTP_PASSWORD", "")
+        if username:
+            smtp.login(username, password)
+        smtp.send_message(message)
 
 
 def create_app(test_config=None):
@@ -24,6 +112,12 @@ def create_app(test_config=None):
         SECRET_KEY=os.environ.get("PARKSHARE_SECRET_KEY", secrets.token_hex(32)),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        MAX_CONTENT_LENGTH=MAX_PHOTO_BYTES + 1024 * 1024,
+        UPLOAD_FOLDER=str(Path(app.static_folder) / "uploads"),
+        PUBLIC_URL=os.environ.get(
+            "PARKSHARE_PUBLIC_URL",
+            "http://127.0.0.1:" + os.environ.get("PARKSHARE_PORT", "5000"),
+        ),
     )
     if test_config:
         app.config.update(test_config)
@@ -70,10 +164,18 @@ def create_app(test_config=None):
             if "_csrf_token" not in session:
                 session["_csrf_token"] = secrets.token_hex(32)
             return session["_csrf_token"]
+        user = current_user()
         return {
             "csrf_token": csrf_token,
             "find_spot": data_store.find_spot,
-            "signed_in_user": current_user(),
+            "signed_in_user": user,
+            "unread_notifications": sum(
+                1 for item in data_store.notifications
+                if user and item["username"] == user.username and not item["read"]
+            ),
+            "map_url": lambda location: (
+                "https://www.openstreetmap.org/search?query=" + quote(location)
+            ),
         }
 
     @app.route("/")
@@ -149,6 +251,151 @@ def create_app(test_config=None):
         flash("You have been signed out.", "success")
         return redirect(url_for("index"))
 
+    @app.route("/forgot-password", methods=["GET", "POST"])
+    def forgot_password():
+        if request.method == "POST":
+            email = request.form.get("email", "").strip().lower()
+            user = next((candidate for candidate in data_store.users_db.values()
+                         if candidate.email.lower() == email and email), None)
+            if user:
+                token = secrets.token_urlsafe(32)
+                token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+                for old_hash, (username, unused_expiry) in list(data_store.password_reset_tokens.items()):
+                    if username == user.username:
+                        del data_store.password_reset_tokens[old_hash]
+                data_store.password_reset_tokens[token_hash] = (
+                    user.username, datetime.now() + timedelta(minutes=30)
+                )
+                data_store.persist()
+                reset_url = current_app.config["PUBLIC_URL"].rstrip("/") + url_for(
+                    "reset_password", token=token
+                )
+                sender = app.config.get("PASSWORD_RESET_SENDER", _send_password_reset)
+                try:
+                    sender(user.email, reset_url)
+                    data_store.log_event(user.username + " requested a password reset")
+                except (OSError, RuntimeError, smtplib.SMTPException, ValueError):
+                    data_store.password_reset_tokens.pop(token_hash, None)
+                    data_store.persist()
+                    app.logger.exception("Unable to send a password-reset email")
+            flash("If an account uses that email, password-reset instructions will be sent.", "success")
+            return redirect(url_for("forgot_password"))
+        return render_template("forgot_password.html")
+
+    @app.route("/reset-password/<token>", methods=["GET", "POST"])
+    def reset_password(token):
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        token_data = data_store.password_reset_tokens.get(token_hash)
+        if not token_data or token_data[1] <= datetime.now():
+            data_store.password_reset_tokens.pop(token_hash, None)
+            data_store.persist()
+            flash("That password-reset link is invalid or expired.", "error")
+            return redirect(url_for("forgot_password"))
+        if request.method == "POST":
+            password = request.form.get("password", "")
+            if not _valid_password(password):
+                flash("Password must be at least 8 characters and include a number.", "error")
+            elif password != request.form.get("confirm_password", ""):
+                flash("Your passwords do not match.", "error")
+            else:
+                username = token_data[0]
+                data_store.users_db[username].password = generate_password_hash(password)
+                del data_store.password_reset_tokens[token_hash]
+                data_store.log_event(username + " reset their password")
+                flash("Your password has been updated. Please sign in.", "success")
+                return redirect(url_for("login"))
+        return render_template("reset_password.html")
+
+    @app.route("/profile", methods=["GET", "POST"])
+    @login_required
+    def profile():
+        user = current_user()
+        if request.method == "POST":
+            full_name = request.form.get("full_name", "").strip()
+            email = request.form.get("email", "").strip().lower()
+            phone = request.form.get("phone", "").strip()
+            vehicle_type = request.form.get("vehicle_type", "")
+            vehicle_plate = request.form.get("vehicle_plate", "").strip().upper()
+            if not full_name or len(full_name) > 80 or len(phone) > 30 or len(vehicle_plate) > 20:
+                flash("Enter a name and keep profile fields within their length limits.", "error")
+            elif email and (len(email) > 254 or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email)):
+                flash("Enter a valid email address.", "error")
+            elif any(candidate.username != user.username and candidate.email.lower() == email
+                     for candidate in data_store.users_db.values() if email):
+                flash("An account already uses that email address.", "error")
+            elif user.role == "Driver" and vehicle_type not in VEHICLE_TYPES:
+                flash("Choose a supported vehicle type.", "error")
+            else:
+                user.full_name = full_name
+                user.email = email
+                user.phone = phone
+                if user.role == "Driver":
+                    user.vehicle_type = vehicle_type
+                    user.vehicle_plate = vehicle_plate
+                data_store.log_event(user.username + " updated their profile")
+                flash("Your profile has been updated.", "success")
+                return redirect(url_for("profile"))
+        return render_template("profile.html", vehicle_types=VEHICLE_TYPES)
+
+    @app.route("/account/delete", methods=["POST"])
+    @login_required
+    def delete_account():
+        user = current_user()
+        if auth_module.authenticate(user.username, request.form.get("current_password", "")) is None:
+            flash("Enter your current password to confirm account deletion.", "error")
+            return redirect(url_for("profile"))
+        active = [booking for booking in data_store.active_bookings()
+                  if booking.driver_username == user.username
+                  or (data_store.find_spot(booking.spot_id)
+                      and data_store.find_spot(booking.spot_id).host_username == user.username)]
+        if active:
+            flash("Complete or cancel your active bookings before deleting your account.", "error")
+            return redirect(url_for("profile"))
+        for spot in data_store.spots_db:
+            if spot.host_username == user.username:
+                spot.is_active = False
+                _delete_photo(getattr(spot, "photo", ""))
+                spot.photo = ""
+                spot.host_username = "Deleted host"
+        for booking in data_store.bookings_db:
+            if booking.driver_username == user.username:
+                booking.driver_username = "Deleted driver"
+        for token_hash, (username, unused_expiry) in list(data_store.password_reset_tokens.items()):
+            if username == user.username:
+                del data_store.password_reset_tokens[token_hash]
+        data_store.notifications[:] = [
+            item for item in data_store.notifications if item["username"] != user.username
+        ]
+        data_store.activity_log[:] = [
+            (timestamp, text.replace(user.username, "Deleted user"))
+            for timestamp, text in data_store.activity_log
+        ]
+        del data_store.users_db[user.username]
+        data_store.log_event("An account was deleted")
+        session.clear()
+        flash("Your account has been deleted.", "success")
+        return redirect(url_for("index"))
+
+    @app.route("/notifications")
+    @login_required
+    def notifications_page():
+        user = current_user()
+        mine = [item for item in data_store.notifications if item["username"] == user.username]
+        return render_template("notifications.html", notifications=mine)
+
+    @app.route("/notifications/<int:notification_id>/read", methods=["POST"])
+    @login_required
+    def mark_notification_read(notification_id):
+        user = current_user()
+        item = next((notification for notification in data_store.notifications
+                     if notification["id"] == notification_id
+                     and notification["username"] == user.username), None)
+        if item is None:
+            abort(404)
+        item["read"] = True
+        data_store.persist()
+        return redirect(url_for("notifications_page"))
+
     @app.route("/dashboard")
     @login_required
     def dashboard():
@@ -178,6 +425,26 @@ def create_app(test_config=None):
         ev_charging = request.args.get("ev_charging") == "1"
         vehicle_type = request.args.get("vehicle_type", "")
         sort_by = request.args.get("sort", "recommended")
+        requested_hours = request.args.get("hours", "1")
+        try:
+            requested_hours = int(requested_hours)
+            if requested_hours < 1 or requested_hours > 168:
+                raise ValueError()
+        except ValueError:
+            requested_hours = 1
+            flash("Booking duration must be between 1 and 168 hours.", "error")
+        try:
+            start_time = _parse_start_time(
+                request.args.get("start_time", ""),
+                _default_start_time(),
+            )
+            if start_time < datetime.now() - timedelta(minutes=1) or start_time > datetime.now() + timedelta(days=30):
+                raise ValueError("Choose a start time within the next 30 days.")
+        except ValueError as error:
+            flash(str(error), "error")
+            start_time = _default_start_time()
+        end_time = start_time + timedelta(hours=requested_hours)
+        availability = {}
         max_price = None
         if max_price_raw:
             try:
@@ -190,7 +457,9 @@ def create_app(test_config=None):
 
         results = []
         for spot in data_store.spots_db:
-            if not spot.is_active or not spot.has_slots():
+            available = data_store.available_slots_for_window(spot, start_time, end_time)
+            availability[spot.spot_id] = available
+            if not spot.is_active or not available:
                 continue
             if keyword and keyword not in spot.location.lower():
                 continue
@@ -208,17 +477,21 @@ def create_app(test_config=None):
         elif sort_by == "rating":
             results.sort(key=lambda item: item.average_rating() or 0, reverse=True)
         elif sort_by == "availability":
-            results.sort(key=lambda item: item.available_slots, reverse=True)
+            results.sort(key=lambda item: availability[item.spot_id], reverse=True)
         return render_template(
             "spots.html",
             spots=results,
+            availability=availability,
             vehicle_types=VEHICLE_TYPES,
             filters={"location": request.args.get("location", ""),
                      "max_price": max_price_raw,
                      "covered": covered,
                      "ev_charging": ev_charging,
                      "vehicle_type": vehicle_type,
-                     "sort": sort_by},
+                     "sort": sort_by,
+                     "start_time": start_time.strftime("%Y-%m-%dT%H:%M"),
+                     "hours": requested_hours,
+                     "minimum_start": datetime.now().strftime("%Y-%m-%dT%H:%M")},
         )
 
     @app.route("/host/spots", methods=["GET", "POST"])
@@ -241,10 +514,15 @@ def create_app(test_config=None):
             if not types:
                 flash("Select at least one vehicle type for this listing.", "error")
                 return redirect(url_for("host_spots"))
+            try:
+                photo = _save_photo(request.files.get("photo"))
+            except ValueError as error:
+                flash(str(error), "error")
+                return redirect(url_for("host_spots"))
             spot = ParkingSpot(
                 data_store.next_spot_id(), location, price, user.username, slots,
                 description, request.form.get("covered") == "on",
-                request.form.get("ev_charging") == "on", types,
+                request.form.get("ev_charging") == "on", types, photo,
             )
             data_store.spots_db.append(spot)
             data_store.log_event(user.username + " listed spot #" + str(spot.spot_id) + " at " + location)
@@ -264,6 +542,8 @@ def create_app(test_config=None):
             flash("A spot with an active vehicle cannot be removed.", "error")
         else:
             spot.is_active = False
+            _delete_photo(getattr(spot, "photo", ""))
+            spot.photo = ""
             data_store.log_event(current_user().username + " removed spot #" + str(spot_id))
             flash("The listing has been removed.", "success")
         return redirect(url_for("host_spots"))
@@ -285,12 +565,21 @@ def create_app(test_config=None):
         if not location or not math.isfinite(price) or price < 1 or not types:
             flash("A location, price of at least ₹1, and one vehicle type are required.", "error")
             return redirect(url_for("host_spots"))
+        upload = request.files.get("photo")
+        try:
+            photo = _save_photo(upload) if upload and upload.filename else None
+        except ValueError as error:
+            flash(str(error), "error")
+            return redirect(url_for("host_spots"))
         spot.location = location
         spot.description = description
         spot.price_per_hour = price
         spot.vehicle_types = types
         spot.covered = request.form.get("covered") == "on"
         spot.ev_charging = request.form.get("ev_charging") == "on"
+        if photo:
+            _delete_photo(getattr(spot, "photo", ""))
+            spot.photo = photo
         data_store.log_event(current_user().username + " updated spot #" + str(spot_id))
         flash("Listing details updated.", "success")
         return redirect(url_for("host_spots"))
@@ -310,31 +599,41 @@ def create_app(test_config=None):
         try:
             spot_id = int(request.form.get("spot_id", ""))
             hours = int(request.form.get("hours", ""))
+            start_time = _parse_start_time(request.form.get("start_time", ""))
         except ValueError:
-            flash("Choose a spot and enter a whole-number duration.", "error")
+            flash("Choose a spot, valid start time, and whole-number duration.", "error")
             return redirect(url_for("spots"))
         if hours < 1 or hours > 168:
             flash("Booking duration must be between 1 and 168 hours.", "error")
             return redirect(url_for("spots"))
+        if start_time < datetime.now() - timedelta(minutes=1) or start_time > datetime.now() + timedelta(days=30):
+            flash("Choose a start time within the next 30 days.", "error")
+            return redirect(url_for("spots"))
+        end_time = start_time + timedelta(hours=hours)
         with booking_lock:
             spot = data_store.find_spot(spot_id)
             user = current_user()
-            if spot is None or not spot.is_active or not spot.has_slots():
+            if spot is None or not spot.is_active:
                 flash("That spot is no longer available.", "error")
                 return redirect(url_for("spots"))
             if user.vehicle_type and user.vehicle_type not in spot.vehicle_types:
                 flash("This spot does not support your registered vehicle type.", "error")
                 return redirect(url_for("spots"))
-            slot_number = data_store.next_free_slot(spot)
+            slot_number = data_store.free_slot_for_window(spot, start_time, end_time)
             if slot_number is None:
-                flash("No space is currently available at that listing.", "error")
+                flash("No space is available for that time range.", "error")
                 return redirect(url_for("spots"))
-            spot.available_slots -= 1
             booking = Booking(
                 data_store.next_booking_id(), spot.spot_id, user.username, hours,
-                spot.price_per_hour, datetime.now(), slot_number,
+                spot.price_per_hour, start_time, slot_number, start_time, end_time,
             )
             data_store.bookings_db.append(booking)
+            data_store.refresh_availability(spot)
+            data_store.add_notification(
+                spot.host_username,
+                user.username + " booked " + spot.location + " from "
+                + start_time.strftime("%d %b %Y %I:%M %p") + ".",
+            )
             data_store.log_event(user.username + " booked spot #" + str(spot.spot_id)
                                  + " (slot " + str(slot_number) + ")")
         flash("Booking confirmed — your assigned space is #" + str(slot_number) + ".", "success")
@@ -349,7 +648,11 @@ def create_app(test_config=None):
                 abort(404)
             booking.status = "Cancelled"
             spot = data_store.find_spot(booking.spot_id)
-            spot.available_slots += 1
+            data_store.refresh_availability(spot)
+            data_store.add_notification(
+                spot.host_username,
+                current_user().username + " cancelled booking #" + str(booking_id) + ".",
+            )
             data_store.log_event(current_user().username + " cancelled booking #" + str(booking_id))
         flash("Booking cancelled without charge.", "success")
         return redirect(url_for("bookings"))
@@ -361,6 +664,9 @@ def create_app(test_config=None):
             booking = data_store.find_booking(booking_id)
             if booking is None or booking.status != "Active" or booking.driver_username != current_user().username:
                 abort(404)
+            if booking.start_time and datetime.now() < booking.start_time:
+                flash("You cannot check out before your booking starts.", "error")
+                return redirect(url_for("bookings"))
             spot = data_store.find_spot(booking.spot_id)
             exit_time = datetime.now()
             amount, hours, overtime = billing_module.final_cost(
@@ -372,7 +678,7 @@ def create_app(test_config=None):
             booking.billed_hours = hours
             booking.final_cost = final_amount
             booking.status = "Completed"
-            spot.available_slots += 1
+            data_store.refresh_availability(spot)
             rating_raw = request.form.get("rating", "")
             if rating_raw:
                 try:
@@ -388,6 +694,11 @@ def create_app(test_config=None):
                                          + " " + str(rating) + "/5")
             data_store.log_event(current_user().username + " released spot #" + str(spot.spot_id)
                                  + " | Rs " + str(final_amount))
+            data_store.add_notification(
+                spot.host_username,
+                current_user().username + " completed booking #" + str(booking_id) + ".",
+            )
+            data_store.persist()
         if promo and not discount:
             flash("Checkout complete. That promo code was not recognized.", "error")
         else:
@@ -399,14 +710,43 @@ def create_app(test_config=None):
     def earnings():
         totals = {}
         completed_count = 0
+        now = datetime.now()
+        month_labels = []
+        monthly_earnings = []
+        first_month_number = now.year * 12 + now.month - 1 - 5
+        for offset in range(6):
+            absolute_month = first_month_number + offset
+            month = datetime(absolute_month // 12, absolute_month % 12 + 1, 1)
+            month_labels.append(month.strftime("%b %Y"))
+            monthly_earnings.append(0.0)
         for booking in data_store.bookings_db:
             spot = data_store.find_spot(booking.spot_id)
             if spot and spot.host_username == current_user().username and booking.final_cost is not None:
                 totals[spot.spot_id] = totals.get(spot.spot_id, 0) + booking.final_cost
                 completed_count += 1
+                completed_at = booking.exit_time or booking.entry_time
+                month_number = completed_at.year * 12 + completed_at.month - 1 - first_month_number
+                if 0 <= month_number < 6:
+                    monthly_earnings[month_number] += booking.final_cost
         total = sum(totals.values())
+        period_start = now - timedelta(days=30)
+        period_end = now
+        host_spots = [spot for spot in data_store.spots_db
+                      if spot.host_username == current_user().username and spot.is_active]
+        capacity_hours = sum(spot.total_slots for spot in host_spots) * 24 * 30
+        booked_hours = 0.0
+        for booking in data_store.bookings_db:
+            spot = data_store.find_spot(booking.spot_id)
+            if not spot or spot.host_username != current_user().username or booking.status == "Cancelled":
+                continue
+            start = booking.start_time or booking.entry_time
+            end = booking.exit_time or booking.end_time or (start + timedelta(hours=booking.planned_hours))
+            booked_hours += max(0, (min(end, period_end) - max(start, period_start)).total_seconds()) / 3600
+        occupancy = min(100, round(booked_hours / capacity_hours * 100, 1)) if capacity_hours else 0
         return render_template("earnings.html", totals=totals, total=total,
-                               completed_count=completed_count)
+                               completed_count=completed_count,
+                               month_labels=month_labels, monthly_earnings=monthly_earnings,
+                               occupancy=occupancy)
 
     @app.route("/activity")
     @login_required
@@ -425,4 +765,8 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(debug=os.environ.get("PARKSHARE_DEBUG") == "1")
+    app.run(
+        host=os.environ.get("PARKSHARE_HOST", "127.0.0.1"),
+        port=int(os.environ.get("PARKSHARE_PORT", "5000")),
+        debug=os.environ.get("PARKSHARE_DEBUG") == "1",
+    )

@@ -47,6 +47,7 @@
         <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
         <button class="button primary button-wide" type="submit">Sign in <span aria-hidden="true">→</span></button>
       </form>
+      <p class="form-switch"><a href="{{ url_for('forgot_password') }}">Forgot your password?</a></p>
       <p class="form-switch">New to ParkShare? <a href="{{ url_for('register') }}">Create an account</a></p>
     {% endif %}
   </section>

@@ -3,11 +3,12 @@
 {% block content %}
 <section class="page-heading"><div><span class="eyebrow">HOST STUDIO</span><h1>Your spaces, your rules.</h1><p>Publish a listing with the details drivers need to book confidently.</p></div></section>
 <section class="host-layout">
-  <form method="post" action="{{ url_for('host_spots') }}" class="form-panel listing-form">
+  <form method="post" action="{{ url_for('host_spots') }}" class="form-panel listing-form" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-heading"><span class="step-tag">NEW LISTING</span><h2>Add a parking space</h2><p>Clear details help the right driver find you.</p></div>
     <label class="field">Location<input name="location" required maxlength="120" placeholder="e.g. Bandra West, Mumbai"></label>
     <label class="field">Description <span class="optional">what makes it useful?</span><textarea name="description" rows="3" maxlength="300" placeholder="Entrance details, nearby landmarks, or anything drivers should know"></textarea></label>
+    <label class="field">Listing photo <span class="optional">JPG, PNG, or WebP · up to 5 MB</span><input type="file" name="photo" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"></label>
     <div class="field-grid"><label class="field">Price per hour (₹)<input type="number" name="price_per_hour" min="1" step="0.5" required placeholder="80"></label><label class="field">Number of spaces<input type="number" name="total_slots" min="1" max="100" required value="1"></label></div>
     <fieldset class="checkbox-group"><legend>Vehicles that fit</legend><div class="check-grid">{% for kind in vehicle_types %}<label><input type="checkbox" name="vehicle_types" value="{{ kind }}" {% if kind == "Car" %}checked{% endif %}> {{ kind }}</label>{% endfor %}</div></fieldset>
     <div class="check-grid"><label><input type="checkbox" name="covered"> Covered parking</label><label><input type="checkbox" name="ev_charging"> EV charging available</label></div>
@@ -17,15 +18,18 @@
     <div class="section-heading compact"><div><span class="eyebrow">YOUR PORTFOLIO</span><h2>Live listings <span class="muted-count">{{ spots|length }}</span></h2></div></div>
     {% for spot in spots %}
     <article class="listing-card">
+      {% if spot.photo %}<img class="listing-photo" src="{{ url_for('static', filename=spot.photo) }}" alt="Parking at {{ spot.location }}">{% endif %}
       <div class="listing-top"><div><span class="step-tag">SPOT #{{ spot.spot_id }}</span><h3>{{ spot.location }}</h3></div><span class="badge available">{{ spot.available_slots }} / {{ spot.total_slots }} open</span></div>
+      <a class="text-link" href="{{ map_url(spot.location) }}" target="_blank" rel="noopener noreferrer">Open location in OpenStreetMap →</a>
       <p>{{ spot.description or "No description added yet." }}</p>
       <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
       <div class="listing-bottom"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }} <small>/ hour</small></strong><span class="rating">★ {{ spot.average_rating() if spot.average_rating() is not none else "New" }}</span></div>
       <details class="edit-details"><summary>Edit listing details</summary>
-        <form method="post" action="{{ url_for('edit_spot', spot_id=spot.spot_id) }}" class="stack-form edit-form">
+        <form method="post" action="{{ url_for('edit_spot', spot_id=spot.spot_id) }}" class="stack-form edit-form" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label class="field">Location<input name="location" value="{{ spot.location }}" required maxlength="120"></label>
           <label class="field">Description<textarea name="description" rows="2" maxlength="300">{{ spot.description }}</textarea></label>
+          <label class="field">Replace photo <span class="optional">JPG, PNG, or WebP · up to 5 MB</span><input type="file" name="photo" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"></label>
           <div class="field-grid"><label class="field">Price per hour<input type="number" name="price_per_hour" min="1" step="0.5" value="{{ spot.price_per_hour }}" required></label><label class="field">Vehicle types<select name="vehicle_types" multiple>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if kind in spot.vehicle_types %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label></div>
           <div class="check-grid"><label><input type="checkbox" name="covered" {% if spot.covered %}checked{% endif %}> Covered</label><label><input type="checkbox" name="ev_charging" {% if spot.ev_charging %}checked{% endif %}> EV charging</label></div>
           <button class="button secondary" type="submit">Save changes</button>
