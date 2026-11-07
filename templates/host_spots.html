@@ -1,12 +1,17 @@
 {% extends "base.html" %}
 {% block title %}My listings{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><link rel="stylesheet" href="{{ url_for('static', filename='parking-map.css') }}">{% endblock %}
 {% block content %}
 <section class="page-heading"><div><span class="eyebrow">HOST STUDIO</span><h1>Your spaces, your rules.</h1><p>Publish a listing with the details drivers need to book confidently.</p></div></section>
 <section class="host-layout">
   <form method="post" action="{{ url_for('host_spots') }}" class="form-panel listing-form" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-heading"><span class="step-tag">NEW LISTING</span><h2>Add a parking space</h2><p>Clear details help the right driver find you.</p></div>
-    <label class="field">Location<input name="location" required maxlength="120" placeholder="e.g. Bandra West, Mumbai"></label>
+    <label class="field">Location<input id="new-listing-location" name="location" required maxlength="120" placeholder="e.g. Bandra West, Mumbai"></label>
+    <div class="map-tools"><button class="button secondary" type="button" data-map-geocode="new-listing-location" data-map-target="new-listing-map">Find location on map</button></div>
+    <div class="parking-map" id="new-listing-map" data-parking-map data-map-mode="picker" data-location-input="new-listing-location" data-latitude-input="new-listing-latitude" data-longitude-input="new-listing-longitude"></div>
+    <input id="new-listing-latitude" name="latitude" type="hidden"><input id="new-listing-longitude" name="longitude" type="hidden">
+    <p class="map-status" data-map-status="new-listing-map" aria-live="polite">Click the map to pin the entrance. A pin is needed for nearby search.</p>
     <label class="field">Description <span class="optional">what makes it useful?</span><textarea name="description" rows="3" maxlength="300" placeholder="Entrance details, nearby landmarks, or anything drivers should know"></textarea></label>
     <label class="field">Listing photo <span class="optional">JPG, PNG, or WebP · up to 5 MB</span><input type="file" name="photo" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"></label>
     <div class="field-grid"><label class="field">Price per hour (₹)<input type="number" name="price_per_hour" min="1" step="0.5" required placeholder="80"></label><label class="field">Number of spaces<input type="number" name="total_slots" min="1" max="100" required value="1"></label></div>
@@ -27,7 +32,11 @@
       <details class="edit-details"><summary>Edit listing details</summary>
         <form method="post" action="{{ url_for('edit_spot', spot_id=spot.spot_id) }}" class="stack-form edit-form" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <label class="field">Location<input name="location" value="{{ spot.location }}" required maxlength="120"></label>
+          <label class="field">Location<input id="spot-location-{{ spot.spot_id }}" name="location" value="{{ spot.location }}" required maxlength="120"></label>
+          <div class="map-tools"><button class="button secondary" type="button" data-map-geocode="spot-location-{{ spot.spot_id }}" data-map-target="spot-map-{{ spot.spot_id }}">Find location on map</button></div>
+          <div class="parking-map compact-map" id="spot-map-{{ spot.spot_id }}" data-parking-map data-map-mode="picker" data-location-input="spot-location-{{ spot.spot_id }}" data-latitude-input="spot-latitude-{{ spot.spot_id }}" data-longitude-input="spot-longitude-{{ spot.spot_id }}" data-latitude="{{ spot.latitude if spot.latitude is not none else '' }}" data-longitude="{{ spot.longitude if spot.longitude is not none else '' }}"></div>
+          <input id="spot-latitude-{{ spot.spot_id }}" name="latitude" type="hidden" value="{{ spot.latitude if spot.latitude is not none else '' }}"><input id="spot-longitude-{{ spot.spot_id }}" name="longitude" type="hidden" value="{{ spot.longitude if spot.longitude is not none else '' }}">
+          <p class="map-status" data-map-status="spot-map-{{ spot.spot_id }}" aria-live="polite">Click the map to pin this parking entrance.</p>
           <label class="field">Description<textarea name="description" rows="2" maxlength="300">{{ spot.description }}</textarea></label>
           <label class="field">Replace photo <span class="optional">JPG, PNG, or WebP · up to 5 MB</span><input type="file" name="photo" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"></label>
           <div class="field-grid"><label class="field">Price per hour<input type="number" name="price_per_hour" min="1" step="0.5" value="{{ spot.price_per_hour }}" required></label><label class="field">Vehicle types<select name="vehicle_types" multiple>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if kind in spot.vehicle_types %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label></div>
@@ -44,4 +53,8 @@
     {% endfor %}
   </section>
 </section>
+{% endblock %}
+{% block page_scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='parking-map.js') }}" defer></script>
 {% endblock %}

@@ -6,7 +6,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 
 - **Driver and host accounts:** Choose an account type and create a profile. Drivers can add their vehicle type and optional plate; hosts can publish and manage parking listings.
 - **Safer signup:** Password confirmation, password-strength guidance, profile validation, CSRF-protected forms, and hashed passwords.
-- **Find a space:** Search by location, maximum hourly price, supported vehicle, covered parking, or EV charging; sort by price, rating, or availability.
+- **Find a space:** Choose a search point on an interactive Leaflet map, find nearby listings by radius, and see compatible vehicles, distance, and a 0–100 recommendation score based on distance (35%), availability (25%), relative price (20%), and rating (20%). The registered driver vehicle is selected by default; listings that do not support it are excluded.
 - **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
 - **Host tools:** Add, edit, and remove listings; upload JPG, PNG, or WebP photos; open map directions; see active vehicles and earnings/occupancy trends.
 - **Account tools:** Edit your profile, delete your account, and request a time-limited password-reset link by email.
@@ -16,6 +16,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 
 Bookings and promo codes simulate a transaction; the project does not process real payments.
 Data is stored in SQLite. Listing photos are stored locally under `static/uploads`.
+New web listings need a map pin so drivers can find them nearby. Leaflet map tiles use OpenStreetMap; place search uses Nominatim. Those map services require an internet connection. Browser location is optional and requires permission.
 
 ## Run the browser app
 

@@ -102,6 +102,8 @@ class ParkShareWebTests(unittest.TestCase):
             "description": "Covered space close to the station",
             "price_per_hour": "75",
             "total_slots": "2",
+            "latitude": "19.0760",
+            "longitude": "72.8777",
             "vehicle_types": ["Car", "SUV"],
             "covered": "on",
             "ev_charging": "on",
@@ -120,6 +122,8 @@ class ParkShareWebTests(unittest.TestCase):
                 "location": "Central Mumbai",
                 "description": "Updated directions for the entrance",
                 "price_per_hour": "75",
+                "latitude": "19.0760",
+                "longitude": "72.8777",
                 "vehicle_types": ["Car", "SUV"],
                 "covered": "on",
                 "ev_charging": "on",
@@ -172,7 +176,9 @@ class ParkShareWebTests(unittest.TestCase):
         host_page = host.get("/host/spots")
         host.post("/host/spots", data={
             "csrf_token": self.csrf(host_page), "location": "Van-only garage",
-            "price_per_hour": "50", "total_slots": "1", "vehicle_types": ["Van"],
+            "price_per_hour": "50", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Van"],
         })
         browse = self.client.get("/spots")
         response = self.client.post("/bookings/create", data={
@@ -187,7 +193,9 @@ class ParkShareWebTests(unittest.TestCase):
         host_page = host.get("/host/spots")
         host.post("/host/spots", data={
             "csrf_token": self.csrf(host_page), "location": "Timed parking",
-            "price_per_hour": "40", "total_slots": "1", "vehicle_types": ["Car"],
+            "price_per_hour": "40", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
         })
         start = (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
         start_value = start.strftime("%Y-%m-%dT%H:%M")
@@ -232,7 +240,9 @@ class ParkShareWebTests(unittest.TestCase):
         host_page = host.get("/host/spots")
         host.post("/host/spots", data={
             "csrf_token": self.csrf(host_page), "location": "Persistent garage",
-            "price_per_hour": "55", "total_slots": "1", "vehicle_types": ["Car"],
+            "price_per_hour": "55", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
         })
         self.register(self.client, "persist_driver")
         browse = self.client.get("/spots")
@@ -244,8 +254,66 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIn("persist_driver", data_store.users_db)
         self.assertTrue(check_password_hash(data_store.users_db["persist_driver"].password, "securepass1"))
         self.assertEqual(len(data_store.spots_db), 1)
+        self.assertEqual(data_store.spots_db[0].latitude, 19.076)
+        self.assertEqual(data_store.spots_db[0].longitude, 72.8777)
         self.assertEqual(len(data_store.bookings_db), 1)
         self.assertEqual(data_store.bookings_db[0].driver_username, "persist_driver")
+
+    def test_map_search_filters_by_radius_and_registered_vehicle(self):
+        host = self.app.test_client()
+        self.register(host, "map_host", "Host")
+        listings = [
+            ("Central car parking", "100", "19.0760", "72.8777", ["Car"]),
+            ("Nearby car parking", "50", "19.0800", "72.8800", ["Car"]),
+            ("Motorcycle parking", "40", "19.0760", "72.8777", ["Motorcycle"]),
+            ("Far car parking", "25", "19.5000", "73.4000", ["Car"]),
+        ]
+        for location, price, latitude, longitude, vehicle_types in listings:
+            page = host.get("/host/spots")
+            host.post("/host/spots", data={
+                "csrf_token": self.csrf(page), "location": location,
+                "price_per_hour": price, "total_slots": "1",
+                "latitude": latitude, "longitude": longitude,
+                "vehicle_types": vehicle_types,
+            })
+
+        self.register(self.client, "nearby_driver", vehicle_type="Car")
+        response = self.client.get(
+            "/spots?near_lat=19.0760&near_lon=72.8777&radius_km=5"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Central car parking", response.data)
+        self.assertIn(b"Nearby car parking", response.data)
+        self.assertNotIn(b"Motorcycle parking", response.data)
+        self.assertNotIn(b"Far car parking", response.data)
+        self.assertIn(b"km away", response.data)
+        self.assertIn(b"match", response.data)
+        self.assertLess(
+            response.data.index(b"<h2>Nearby car parking</h2>"),
+            response.data.index(b"<h2>Central car parking</h2>"),
+        )
+        self.assertIn(b"data-parking-map", response.data)
+        self.assertIn(b"parking-map.js", response.data)
+
+    def test_host_must_pin_the_listing_entrance(self):
+        host = self.app.test_client()
+        self.register(host, "unmapped_host", "Host")
+        page = host.get("/host/spots")
+        self.assertIn(b"pin the entrance", page.data)
+        self.assertIn(b"data-parking-map", page.data)
+        response = host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Unpinned parking",
+            "price_per_hour": "45", "total_slots": "1", "vehicle_types": ["Car"],
+        }, follow_redirects=True)
+        self.assertIn(b"Pin the parking entrance on the map", response.data)
+        self.assertEqual(data_store.spots_db, [])
+
+    def test_empty_search_explains_that_a_host_must_list_a_space(self):
+        self.register(self.client, "empty_inventory_driver")
+        response = self.client.get("/spots")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"No parking spots have been listed yet", response.data)
+        self.assertIn(b"Create a host account", response.data)
 
     def test_profile_update_notifications_and_account_deletion_require_password(self):
         self.register(self.client, "profile_driver")
@@ -300,7 +368,9 @@ class ParkShareWebTests(unittest.TestCase):
         page = host.get("/host/spots")
         response = host.post("/host/spots", data={
             "csrf_token": self.csrf(page), "location": "Photo listing",
-            "price_per_hour": "50", "total_slots": "1", "vehicle_types": ["Car"],
+            "price_per_hour": "50", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
             "photo": (BytesIO(b"not an image"), "fake.jpg"),
         }, content_type="multipart/form-data", follow_redirects=True)
         self.assertIn(b"Upload a valid JPG, PNG, or WebP image", response.data)
@@ -312,7 +382,9 @@ class ParkShareWebTests(unittest.TestCase):
         page = host.get("/host/spots")
         response = host.post("/host/spots", data={
             "csrf_token": self.csrf(page), "location": "Image garage",
-            "price_per_hour": "50", "total_slots": "1", "vehicle_types": ["Car"],
+            "price_per_hour": "50", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
             "photo": (BytesIO(self.png_pixel()), "garage.png"),
         }, content_type="multipart/form-data", follow_redirects=True)
         self.assertEqual(response.status_code, 200)

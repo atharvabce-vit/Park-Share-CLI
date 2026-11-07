@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#101b2c">
   <title>{% block title %}ParkShare{% endblock %} · ParkShare</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block page_head %}{% endblock %}
 </head>
 <body>
   <header class="topbar">
@@ -45,5 +46,6 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="footer">ParkShare · A better place to park.</footer>
+  {% block page_scripts %}{% endblock %}
 </body>
 </html>

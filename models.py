@@ -16,7 +16,7 @@ class User:
 class ParkingSpot:
     def __init__(self, spot_id, location, price_per_hour, host_username, total_slots,
                  description="", covered=False, ev_charging=False, vehicle_types=None,
-                 photo=""):
+                 photo="", latitude=None, longitude=None):
         self.spot_id = spot_id
         self.location = location
         self.price_per_hour = price_per_hour
@@ -30,6 +30,8 @@ class ParkingSpot:
         self.ratings = []
         self.is_active = True
         self.photo = photo
+        self.latitude = latitude
+        self.longitude = longitude
 
     def has_slots(self):
         return self.available_slots > 0

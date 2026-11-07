@@ -50,6 +50,36 @@ def _valid_password(password):
     return len(password) >= 8 and any(character.isdigit() for character in password)
 
 
+def _coordinates(latitude_raw, longitude_raw):
+    if not latitude_raw and not longitude_raw:
+        return None, None
+    try:
+        latitude = float(latitude_raw)
+        longitude = float(longitude_raw)
+    except (TypeError, ValueError):
+        raise ValueError("Choose a valid point on the map.")
+    if not math.isfinite(latitude) or not math.isfinite(longitude):
+        raise ValueError("Choose a valid point on the map.")
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValueError("The selected map coordinates are outside valid bounds.")
+    return latitude, longitude
+
+
+def _distance_km(latitude, longitude, other_latitude, other_longitude):
+    earth_radius_km = 6371.0088
+    lat1, lat2 = math.radians(latitude), math.radians(other_latitude)
+    delta_lat = lat2 - lat1
+    delta_lon = math.radians(other_longitude - longitude)
+    value = (math.sin(delta_lat / 2) ** 2
+             + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2)
+    value = min(1.0, max(0.0, value))
+    return earth_radius_km * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+
+
+def _clamp_score(value):
+    return min(1.0, max(0.0, value))
+
+
 def _save_photo(upload):
     if upload is None or not upload.filename:
         return ""
@@ -423,7 +453,10 @@ def create_app(test_config=None):
         max_price_raw = request.args.get("max_price", "").strip()
         covered = request.args.get("covered") == "1"
         ev_charging = request.args.get("ev_charging") == "1"
-        vehicle_type = request.args.get("vehicle_type", "")
+        requested_vehicle = request.args.get("vehicle_type")
+        vehicle_type = requested_vehicle if requested_vehicle is not None else current_user().vehicle_type
+        if vehicle_type not in VEHICLE_TYPES and vehicle_type != "Any":
+            vehicle_type = current_user().vehicle_type or "Any"
         sort_by = request.args.get("sort", "recommended")
         requested_hours = request.args.get("hours", "1")
         try:
@@ -445,6 +478,23 @@ def create_app(test_config=None):
             start_time = _default_start_time()
         end_time = start_time + timedelta(hours=requested_hours)
         availability = {}
+        distances = {}
+        recommendation_scores = {}
+        near_latitude = None
+        near_longitude = None
+        nearby_raw = request.args.get("near_lat", "").strip()
+        nearby_lon_raw = request.args.get("near_lon", "").strip()
+        try:
+            near_latitude, near_longitude = _coordinates(nearby_raw, nearby_lon_raw)
+        except ValueError as error:
+            flash(str(error), "error")
+        try:
+            radius_km = float(request.args.get("radius_km", "5"))
+            if not math.isfinite(radius_km) or radius_km not in (1, 3, 5, 10, 25, 50):
+                raise ValueError()
+        except ValueError:
+            radius_km = 5
+            flash("Choose a search radius from 1, 3, 5, 10, 25, or 50 km.", "error")
         max_price = None
         if max_price_raw:
             try:
@@ -461,28 +511,74 @@ def create_app(test_config=None):
             availability[spot.spot_id] = available
             if not spot.is_active or not available:
                 continue
+            if vehicle_type != "Any" and vehicle_type not in spot.vehicle_types:
+                continue
             if keyword and keyword not in spot.location.lower():
                 continue
+            if near_latitude is not None:
+                if spot.latitude is None or spot.longitude is None:
+                    continue
+                distance = _distance_km(
+                    near_latitude, near_longitude, spot.latitude, spot.longitude
+                )
+                if distance > radius_km:
+                    continue
+                distances[spot.spot_id] = distance
+            elif spot.latitude is not None and spot.longitude is not None:
+                distances[spot.spot_id] = None
             if max_price is not None and spot.price_per_hour > max_price:
                 continue
             if covered and not spot.covered:
                 continue
             if ev_charging and not spot.ev_charging:
                 continue
-            if vehicle_type and vehicle_type not in spot.vehicle_types:
-                continue
             results.append(spot)
+        lowest_price = min((spot.price_per_hour for spot in results), default=0)
+        highest_price = max((spot.price_per_hour for spot in results), default=0)
+        for spot in results:
+            distance_score = (
+                _clamp_score(1 - distances[spot.spot_id] / radius_km)
+                if near_latitude is not None else 0.5
+            )
+            availability_score = availability[spot.spot_id] / spot.total_slots
+            price_score = (
+                1 - (spot.price_per_hour - lowest_price) / (highest_price - lowest_price)
+                if highest_price > lowest_price else 1.0
+            )
+            rating = spot.average_rating()
+            rating_score = rating / 5 if rating is not None else 0.5
+            recommendation_scores[spot.spot_id] = round(
+                (distance_score * 0.35 + availability_score * 0.25
+                 + price_score * 0.20 + rating_score * 0.20) * 100
+            )
+        map_markers = [
+            {
+                "latitude": spot.latitude,
+                "longitude": spot.longitude,
+                "label": spot.location,
+                "price": format(spot.price_per_hour, ".2f"),
+                "vehicle_types": spot.vehicle_types,
+                "url": url_for("spots", location=spot.location),
+            }
+            for spot in results if spot.latitude is not None and spot.longitude is not None
+        ]
         if sort_by == "price":
             results.sort(key=lambda item: item.price_per_hour)
         elif sort_by == "rating":
             results.sort(key=lambda item: item.average_rating() or 0, reverse=True)
         elif sort_by == "availability":
             results.sort(key=lambda item: availability[item.spot_id], reverse=True)
+        else:
+            results.sort(key=lambda item: recommendation_scores[item.spot_id], reverse=True)
         return render_template(
             "spots.html",
             spots=results,
             availability=availability,
+            distances=distances,
+            recommendation_scores=recommendation_scores,
+            map_markers=map_markers,
             vehicle_types=VEHICLE_TYPES,
+            active_spot_count=sum(1 for spot in data_store.spots_db if spot.is_active),
             filters={"location": request.args.get("location", ""),
                      "max_price": max_price_raw,
                      "covered": covered,
@@ -491,7 +587,10 @@ def create_app(test_config=None):
                      "sort": sort_by,
                      "start_time": start_time.strftime("%Y-%m-%dT%H:%M"),
                      "hours": requested_hours,
-                     "minimum_start": datetime.now().strftime("%Y-%m-%dT%H:%M")},
+                     "minimum_start": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+                     "near_lat": "" if near_latitude is None else format(near_latitude, ".6f"),
+                     "near_lon": "" if near_longitude is None else format(near_longitude, ".6f"),
+                     "radius_km": int(radius_km)},
         )
 
     @app.route("/host/spots", methods=["GET", "POST"])
@@ -504,8 +603,14 @@ def create_app(test_config=None):
             try:
                 price = float(request.form.get("price_per_hour", ""))
                 slots = int(request.form.get("total_slots", ""))
+                latitude, longitude = _coordinates(
+                    request.form.get("latitude", ""), request.form.get("longitude", "")
+                )
             except ValueError:
-                flash("Enter a valid hourly price and number of spaces.", "error")
+                flash("Enter a valid price, number of spaces, and map location.", "error")
+                return redirect(url_for("host_spots"))
+            if latitude is None or longitude is None:
+                flash("Pin the parking entrance on the map before publishing.", "error")
                 return redirect(url_for("host_spots"))
             if not location or not math.isfinite(price) or price < 1 or slots < 1 or slots > 100:
                 flash("Location is required, price must be at least ₹1, and spaces must be between 1 and 100.", "error")
@@ -522,7 +627,7 @@ def create_app(test_config=None):
             spot = ParkingSpot(
                 data_store.next_spot_id(), location, price, user.username, slots,
                 description, request.form.get("covered") == "on",
-                request.form.get("ev_charging") == "on", types, photo,
+                request.form.get("ev_charging") == "on", types, photo, latitude, longitude,
             )
             data_store.spots_db.append(spot)
             data_store.log_event(user.username + " listed spot #" + str(spot.spot_id) + " at " + location)
@@ -558,8 +663,11 @@ def create_app(test_config=None):
         description = request.form.get("description", "").strip()
         try:
             price = float(request.form.get("price_per_hour", ""))
+            latitude, longitude = _coordinates(
+                request.form.get("latitude", ""), request.form.get("longitude", "")
+            )
         except ValueError:
-            flash("Enter a valid hourly price.", "error")
+            flash("Enter a valid hourly price and map location.", "error")
             return redirect(url_for("host_spots"))
         types = [item for item in VEHICLE_TYPES if item in request.form.getlist("vehicle_types")]
         if not location or not math.isfinite(price) or price < 1 or not types:
@@ -580,6 +688,8 @@ def create_app(test_config=None):
         if photo:
             _delete_photo(getattr(spot, "photo", ""))
             spot.photo = photo
+        spot.latitude = latitude
+        spot.longitude = longitude
         data_store.log_event(current_user().username + " updated spot #" + str(spot_id))
         flash("Listing details updated.", "success")
         return redirect(url_for("host_spots"))

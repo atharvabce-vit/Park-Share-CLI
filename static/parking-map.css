@@ -1,0 +1,77 @@
+.parking-map {
+  height: 300px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.compact-map {
+  height: 240px;
+}
+
+.map-tools {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.map-tools .field {
+  flex: 1 1 220px;
+}
+
+.map-tools .button {
+  min-height: 40px;
+}
+
+.map-status {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.nearby-panel {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+}
+
+.nearby-panel h2 {
+  font-size: 16px;
+  margin: 4px 0;
+}
+
+.nearby-panel p {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
+
+.nearby-panel > .button {
+  justify-self: start;
+}
+
+.recommendation-meta {
+  color: var(--green-dark) !important;
+  font-size: 10px !important;
+  min-height: 0 !important;
+  font-weight: 700;
+}
+
+.leaflet-popup-content {
+  font: 12px/1.5 "DM Sans", sans-serif;
+}
+
+.leaflet-popup-content p {
+  margin: 4px 0 0;
+}
+
+@media (max-width: 650px) {
+  .parking-map {
+    height: 250px;
+  }
+}
