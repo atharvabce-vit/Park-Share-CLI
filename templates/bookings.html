@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Bookings{% endblock %}
+{% block content %}
+<section class="page-heading"><div><span class="eyebrow">YOUR PARKSHARE HISTORY</span><h1>Bookings.</h1><p>Every stay, all in one place.</p></div></section>
+{% if bookings %}
+<section class="booking-list">
+  {% for booking in bookings|reverse %}
+    {% set spot = find_spot(booking.spot_id) %}
+    <article class="booking-card">
+      <div class="booking-head"><div><span class="step-tag">BOOKING #{{ booking.booking_id }}</span><h2>{{ spot.location }}</h2></div><span class="badge {{ booking.status|lower }}">{{ booking.status }}</span></div>
+      <div class="booking-meta"><span>Space #{{ booking.slot_number }}</span><span>Planned {{ booking.planned_hours }} hour{% if booking.planned_hours != 1 %}s{% endif %}</span><span>₹{{ "%.2f"|format(booking.price_per_hour) }} / hour</span><span>{{ booking.entry_time.strftime("%d %b %Y, %I:%M %p") }}</span></div>
+      {% if booking.status == "Active" and signed_in_user.role == "Driver" %}
+      <div class="booking-actions">
+        <form method="post" action="{{ url_for('checkout', booking_id=booking.booking_id) }}" class="checkout-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="field">Promo code <input name="promo_code" maxlength="30" placeholder="Optional"></label>
+          <label class="field">Rate your stay <select name="rating"><option value="">Skip rating</option>{% for star in range(5, 0, -1) %}<option value="{{ star }}">{{ star }} star{% if star != 1 %}s{% endif %}</option>{% endfor %}</select></label>
+          <button class="button primary" type="submit">Checkout</button>
+        </form>
+        <form method="post" action="{{ url_for('cancel_booking', booking_id=booking.booking_id) }}" onsubmit="return confirm('Cancel this active booking?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button danger-outline" type="submit">Cancel booking</button>
+        </form>
+      </div>
+      {% elif booking.status == "Completed" %}
+      <div class="completed-total"><span>Checked out {{ booking.exit_time.strftime("%d %b %Y, %I:%M %p") if booking.exit_time else "" }}</span><strong>₹{{ "%.2f"|format(booking.final_cost or 0) }}</strong></div>
+      {% endif %}
+    </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty-state"><span>▤</span><h2>No bookings yet</h2><p>{% if signed_in_user.role == "Driver" %}Find a space that works for you and your first booking will appear here.{% else %}Once drivers book your listings, you can follow their status here.{% endif %}</p>{% if signed_in_user.role == "Driver" %}<a class="button primary" href="{{ url_for('spots') }}">Explore spaces</a>{% endif %}</section>
+{% endif %}
+{% endblock %}

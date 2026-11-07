@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b2c">
+  <title>{% block title %}ParkShare{% endblock %} · ParkShare</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">P</span> ParkShare</a>
+    <nav>
+      {% if signed_in_user %}
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('spots') }}">Find parking</a>
+        <a href="{{ url_for('bookings') }}">Bookings</a>
+        {% if signed_in_user.role == "Host" %}
+          <a href="{{ url_for('host_spots') }}">My listings</a>
+          <a href="{{ url_for('earnings') }}">Earnings</a>
+        {% endif %}
+        <a href="{{ url_for('activity') }}">Activity</a>
+        <form class="nav-form" method="post" action="{{ url_for('logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="nav-logout" type="submit">Sign out</button>
+        </form>
+      {% else %}
+        <a href="{{ url_for('login') }}">Sign in</a>
+        <a class="nav-cta" href="{{ url_for('register') }}">Create account</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main class="page-shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="flash-stack" aria-live="polite">
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">ParkShare · A better place to park.</footer>
+</body>
+</html>

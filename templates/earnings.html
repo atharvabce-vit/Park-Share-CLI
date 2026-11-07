@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Host earnings{% endblock %}
+{% block content %}
+<section class="page-heading"><div><span class="eyebrow">HOST OVERVIEW</span><h1>Your earnings.</h1><p>Completed stays and revenue from your spaces.</p></div></section>
+<section class="earnings-hero"><div><span>ALL-TIME EARNINGS</span><strong>₹{{ "%.2f"|format(total) }}</strong><small>{{ completed_count }} completed booking{% if completed_count != 1 %}s{% endif %}</small></div><span class="earnings-symbol">₹</span></section>
+<section class="section-heading"><div><span class="eyebrow">BY PARKING SPACE</span><h2>Listing performance</h2></div></section>
+<section class="simple-list">
+  {% for spot_id, amount in totals.items() %}
+    {% set spot = find_spot(spot_id) %}
+    <div class="list-row"><span class="spot-mini-icon">⌖</span><div><strong>{{ spot.location }}</strong><small>Spot #{{ spot_id }} · {{ spot.average_rating() if spot.average_rating() is not none else "No ratings yet" }}{% if spot.average_rating() is not none %} stars{% endif %}</small></div><strong class="earnings-amount">₹{{ "%.2f"|format(amount) }}</strong></div>
+  {% else %}
+    <div class="empty-state small"><span>₹</span><h2>Your first earning is waiting</h2><p>Once a driver checks out from one of your spaces, earnings appear here.</p><a class="button ghost" href="{{ url_for('host_spots') }}">Manage listings</a></div>
+  {% endfor %}
+</section>
+{% endblock %}

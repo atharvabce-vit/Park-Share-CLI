@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Parking, made easier{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <span class="eyebrow">YOUR SPACE. YOUR SCHEDULE.</span>
+    <h1>Parking that fits<br><span>your day.</span></h1>
+    <p>Find a spot nearby or turn your empty parking space into extra income. Simple, local, and made for real life.</p>
+    <div class="hero-actions">
+      <a class="button primary" href="{{ url_for('register') }}">Get started <span aria-hidden="true">→</span></a>
+      <a class="button ghost" href="{{ url_for('login') }}">I already have an account</a>
+    </div>
+  </div>
+  <div class="hero-card">
+    <div class="map-orbit orbit-one"></div><div class="map-orbit orbit-two"></div>
+    <div class="pin pin-one">P</div><div class="pin pin-two">P</div><div class="pin pin-three">P</div>
+    <div class="map-card">
+      <span class="map-icon">⌖</span>
+      <div><strong>Parking, around you</strong><small>Find a spot that works</small></div>
+      <span class="map-arrow">↗</span>
+    </div>
+    <div class="floating-note"><span class="online-dot"></span> {{ available_slots }} open spaces</div>
+  </div>
+</section>
+<section class="metric-row">
+  <div><strong>{{ spot_count }}</strong><span>local listings</span></div>
+  <div><strong>{{ available_slots }}</strong><span>spaces available</span></div>
+  <div><strong>2</strong><span>ways to get started</span></div>
+</section>
+<section class="feature-grid">
+  <article class="feature-card"><span class="feature-icon">⌕</span><h2>For drivers</h2><p>Filter by neighborhood, price, vehicle type, covered parking, or EV charging.</p></article>
+  <article class="feature-card"><span class="feature-icon">⌂</span><h2>For hosts</h2><p>List your space, choose what vehicles fit, and track bookings and earnings.</p></article>
+  <article class="feature-card"><span class="feature-icon">✓</span><h2>Clear from start to finish</h2><p>See your assigned slot, manage active bookings, and review checkout totals.</p></article>
+</section>
+{% endblock %}

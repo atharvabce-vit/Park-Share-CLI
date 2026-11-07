@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Activity{% endblock %}
+{% block content %}
+<section class="page-heading"><div><span class="eyebrow">THE LATEST</span><h1>ParkShare activity.</h1><p>Recent platform events, newest first.</p></div></section>
+<section class="timeline">
+  {% for timestamp, event in events %}
+    <article class="timeline-item"><span class="timeline-dot"></span><div><p>{{ event }}</p><time>{{ timestamp.strftime("%d %b %Y · %I:%M %p") }}</time></div></article>
+  {% else %}
+    <div class="empty-state small"><span>◷</span><h2>It's quiet for now</h2><p>Your ParkShare activity will show up here.</p></div>
+  {% endfor %}
+</section>
+{% endblock %}

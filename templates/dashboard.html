@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><span class="eyebrow">{{ signed_in_user.role }} DASHBOARD</span><h1>Welcome, {{ signed_in_user.full_name or signed_in_user.username }}.</h1><p>Your ParkShare, at a glance.</p></div>
+  <div class="avatar">{{ (signed_in_user.full_name or signed_in_user.username)[0]|upper }}</div>
+</section>
+<section class="stats-grid">
+  <article class="stat-card"><span>Active bookings</span><strong>{{ active_bookings|length }}</strong><small>{% if signed_in_user.role == "Driver" %}Your current parking{% else %}Vehicles at your spaces{% endif %}</small></article>
+  {% if signed_in_user.role == "Host" %}
+  <article class="stat-card"><span>Live listings</span><strong>{{ my_spots|length }}</strong><small>Spaces currently listed</small></article>
+  <article class="stat-card"><span>Available capacity</span><strong>{{ my_spots|sum(attribute="available_slots") }}</strong><small>Open spaces across your listings</small></article>
+  {% else %}
+  <article class="stat-card"><span>Spaces to choose from</span><strong>{{ available_spots|length }}</strong><small>Listings with availability</small></article>
+  <article class="stat-card"><span>Your vehicle</span><strong class="stat-text">{{ signed_in_user.vehicle_type or "Not set" }}</strong><small>{{ signed_in_user.vehicle_plate or "Add your vehicle details in your profile" }}</small></article>
+  {% endif %}
+</section>
+<section class="section-heading"><div><span class="eyebrow">QUICK ACTIONS</span><h2>What would you like to do?</h2></div></section>
+<section class="action-grid">
+  {% if signed_in_user.role == "Driver" %}
+    <a class="action-card" href="{{ url_for('spots') }}"><span class="action-icon">⌕</span><strong>Find a parking spot</strong><small>Search listings and compare amenities.</small><span class="card-arrow">→</span></a>
+    <a class="action-card" href="{{ url_for('bookings') }}"><span class="action-icon">▤</span><strong>Manage bookings</strong><small>Review active and completed stays.</small><span class="card-arrow">→</span></a>
+  {% else %}
+    <a class="action-card" href="{{ url_for('host_spots') }}"><span class="action-icon">＋</span><strong>Manage my listings</strong><small>Add, update, and remove parking spaces.</small><span class="card-arrow">→</span></a>
+    <a class="action-card" href="{{ url_for('earnings') }}"><span class="action-icon">₹</span><strong>View earnings</strong><small>See completed booking revenue.</small><span class="card-arrow">→</span></a>
+  {% endif %}
+  <a class="action-card" href="{{ url_for('activity') }}"><span class="action-icon">◷</span><strong>Recent activity</strong><small>See the latest ParkShare updates.</small><span class="card-arrow">→</span></a>
+</section>
+{% if active_bookings %}
+<section class="section-heading"><div><span class="eyebrow">HAPPENING NOW</span><h2>Active parking</h2></div><a class="text-link" href="{{ url_for('bookings') }}">View all →</a></section>
+<section class="simple-list">
+  {% for booking in active_bookings %}
+    {% set spot = find_spot(booking.spot_id) %}
+    <div class="list-row"><span class="status-dot"></span><div><strong>{{ spot.location }}</strong><small>Booking #{{ booking.booking_id }} · Slot {{ booking.slot_number }}</small></div><span class="badge active">Active</span></div>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

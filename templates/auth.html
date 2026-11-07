@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ "Create your account" if mode == "register" else "Welcome back" }}{% endblock %}
+{% block content %}
+<section class="auth-layout">
+  <aside class="auth-aside">
+    <span class="eyebrow">PARKSHARE MEMBERSHIP</span>
+    <h1>{{ "Make room for" if mode == "register" else "Good to see" }}<br><span>{{ "better parking." if mode == "register" else "you again." }}</span></h1>
+    <p>{{ "A few details help us make your parking experience safer and more personal." if mode == "register" else "Sign in to pick up right where you left off." }}</p>
+    <div class="trust-list"><span>✓ &nbsp; Your profile stays yours</span><span>✓ &nbsp; One account, two ways to use ParkShare</span><span>✓ &nbsp; Passwords are securely hashed</span></div>
+  </aside>
+  <section class="form-panel">
+    {% if mode == "register" %}
+      <div class="form-heading"><span class="step-tag">YOUR PARKSHARE PROFILE</span><h2>Create your account</h2><p>Set up your profile to get a more personal experience.</p></div>
+      <form method="post" action="{{ url_for('register') }}" class="stack-form" id="register-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <fieldset class="role-picker">
+          <legend>How will you use ParkShare?</legend>
+          <label class="role-option"><input type="radio" name="role" value="Driver" {% if form_data.get("role", "Driver") == "Driver" %}checked{% endif %}><span class="role-symbol">↗</span><span><strong>Find parking</strong><small>I'm a driver</small></span></label>
+          <label class="role-option"><input type="radio" name="role" value="Host" {% if form_data.get("role") == "Host" %}checked{% endif %}><span class="role-symbol">⌂</span><span><strong>Share my space</strong><small>I'm a host</small></span></label>
+        </fieldset>
+        <div class="field-grid">
+          <label class="field full">Full name<input name="full_name" value="{{ form_data.get('full_name', '') }}" autocomplete="name" required maxlength="80" placeholder="How should we address you?"></label>
+          <label class="field">Username<input name="username" value="{{ form_data.get('username', '') }}" autocomplete="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_-]+" placeholder="e.g. alex_park"></label>
+          <label class="field">Email address<input name="email" value="{{ form_data.get('email', '') }}" type="email" autocomplete="email" placeholder="you@example.com"></label>
+          <label class="field">Phone number <span class="optional">optional</span><input name="phone" value="{{ form_data.get('phone', '') }}" type="tel" autocomplete="tel" placeholder="+91 98765 43210"></label>
+        </div>
+        <div class="driver-fields">
+          <div class="field-grid">
+            <label class="field">Vehicle type<select name="vehicle_type" required><option value="">Choose your vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if form_data.get("vehicle_type") == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
+            <label class="field">Vehicle plate <span class="optional">optional</span><input name="vehicle_plate" value="{{ form_data.get('vehicle_plate', '') }}" maxlength="20" placeholder="e.g. MH 01 AB 1234"></label>
+          </div>
+        </div>
+        <div class="field-grid">
+          <label class="field">Password<input id="password" name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="At least 8 characters"></label>
+          <label class="field">Confirm password<input name="confirm_password" type="password" autocomplete="new-password" required minlength="8" placeholder="Type it again"></label>
+        </div>
+        <div class="password-hint"><span id="password-strength" class="strength-bar"></span><small id="password-message">Use 8+ characters and include at least one number.</small></div>
+        <label class="terms-check"><input type="checkbox" name="terms" value="accepted" required><span>I agree to use ParkShare responsibly and provide accurate profile details.</span></label>
+        <button class="button primary button-wide" type="submit">Create my account <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="form-switch">Already registered? <a href="{{ url_for('login') }}">Sign in</a></p>
+    {% else %}
+      <div class="form-heading"><span class="step-tag">WELCOME BACK</span><h2>Sign in</h2><p>Enter your ParkShare account details.</p></div>
+      <form method="post" action="{{ url_for('login') }}" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="field">Username<input name="username" autocomplete="username" required autofocus></label>
+        <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="button primary button-wide" type="submit">Sign in <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="form-switch">New to ParkShare? <a href="{{ url_for('register') }}">Create an account</a></p>
+    {% endif %}
+  </section>
+</section>
+{% if mode == "register" %}
+<script>
+  (function () {
+    var radios = document.querySelectorAll('input[name="role"]');
+    var driverFields = document.querySelector(".driver-fields");
+    var vehicleSelect = document.querySelector('[name="vehicle_type"]');
+    function updateRole() {
+      var isDriver = document.querySelector('input[name="role"]:checked').value === "Driver";
+      driverFields.hidden = !isDriver;
+      vehicleSelect.required = isDriver;
+    }
+    radios.forEach(function (radio) { radio.addEventListener("change", updateRole); });
+    updateRole();
+    var password = document.getElementById("password");
+    var strength = document.getElementById("password-strength");
+    var message = document.getElementById("password-message");
+    password.addEventListener("input", function () {
+      var value = password.value;
+      var score = (value.length >= 8) + (/[0-9]/.test(value)) + (/[A-Z]/.test(value)) + (/[^A-Za-z0-9]/.test(value));
+      strength.className = "strength-bar strength-" + score;
+      message.textContent = value.length === 0 ? "Use 8+ characters and include at least one number." :
+        score < 2 ? "A little more strength would help." : score < 4 ? "Looking good — add variety for extra strength." : "Strong password.";
+    });
+  }());
+</script>
+{% endif %}
+{% endblock %}

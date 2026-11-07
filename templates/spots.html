@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Find parking{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><span class="eyebrow">PARKING, YOUR WAY</span><h1>Find your next spot.</h1><p>Compare spaces, check the details, and book with confidence.</p></div>
+  <span class="result-count">{{ spots|length }} available</span>
+</section>
+<form class="filter-panel" method="get" action="{{ url_for('spots') }}">
+  <label class="field">Location<input name="location" value="{{ filters.location }}" placeholder="Neighborhood or area"></label>
+  <label class="field">Max price / hour<input type="number" min="0" step="0.5" name="max_price" value="{{ filters.max_price }}" placeholder="Any price"></label>
+  <label class="field">Vehicle type<select name="vehicle_type"><option value="">Any vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if filters.vehicle_type == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
+  <label class="field">Sort by<select name="sort"><option value="recommended" {% if filters.sort == "recommended" %}selected{% endif %}>Recommended</option><option value="price" {% if filters.sort == "price" %}selected{% endif %}>Price: low to high</option><option value="rating" {% if filters.sort == "rating" %}selected{% endif %}>Top rated</option><option value="availability" {% if filters.sort == "availability" %}selected{% endif %}>Most spaces</option></select></label>
+  <div class="filter-options"><label><input type="checkbox" name="covered" value="1" {% if filters.covered %}checked{% endif %}> Covered</label><label><input type="checkbox" name="ev_charging" value="1" {% if filters.ev_charging %}checked{% endif %}> EV charging</label><button class="button primary" type="submit">Apply filters</button></div>
+</form>
+{% if spots %}
+<section class="spot-grid">
+  {% for spot in spots %}
+  <article class="spot-card">
+    <div class="spot-visual"><span class="spot-visual-icon">⌖</span><span class="badge available">{{ spot.available_slots }} / {{ spot.total_slots }} open</span></div>
+    <div class="spot-body">
+      <div class="spot-title"><h2>{{ spot.location }}</h2><span class="rating">★ {{ spot.average_rating() if spot.average_rating() is not none else "New" }}</span></div>
+      <p>{{ spot.description or "A convenient local parking space, ready when you are." }}</p>
+      <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
+      <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>Host · {{ spot.host_username }}</span></div>
+      {% if signed_in_user.role == "Driver" %}
+      <form method="post" action="{{ url_for('create_booking') }}" class="book-row">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="spot_id" value="{{ spot.spot_id }}">
+        <label class="sr-only" for="hours-{{ spot.spot_id }}">Hours</label><input id="hours-{{ spot.spot_id }}" name="hours" type="number" min="1" max="168" value="1" required>
+        <button class="button primary" type="submit">Book this spot</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty-state"><span>⌕</span><h2>No spots match those filters</h2><p>Try a different area, vehicle, or price range.</p><a class="button ghost" href="{{ url_for('spots') }}">Clear filters</a></section>
+{% endif %}
+{% endblock %}
