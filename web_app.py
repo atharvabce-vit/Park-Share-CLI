@@ -76,6 +76,38 @@ def _distance_km(latitude, longitude, other_latitude, other_longitude):
     return earth_radius_km * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
 
 
+def _demo_area_markers(latitude, longitude, radius_km):
+    markers = []
+    directions = (
+        ("N", 0), ("NE", 45), ("E", 90), ("SE", 135),
+        ("S", 180), ("SW", 225), ("W", 270), ("NW", 315),
+    )
+    earth_radius_km = 6371.0088
+    for distance in range(5, int(radius_km) + 1, 5):
+        angular_distance = distance / earth_radius_km
+        lat1 = math.radians(latitude)
+        lon1 = math.radians(longitude)
+        for direction, bearing_degrees in directions:
+            bearing = math.radians(bearing_degrees)
+            lat2 = math.asin(
+                math.sin(lat1) * math.cos(angular_distance)
+                + math.cos(lat1) * math.sin(angular_distance) * math.cos(bearing)
+            )
+            lon2 = lon1 + math.atan2(
+                math.sin(bearing) * math.sin(angular_distance) * math.cos(lat1),
+                math.cos(angular_distance) - math.sin(lat1) * math.sin(lat2),
+            )
+            markers.append({
+                "latitude": math.degrees(lat2),
+                "longitude": (math.degrees(lon2) + 540) % 360 - 180,
+                "label": "DEMO AREA PIN · " + str(distance) + " km " + direction,
+                "distance_km": distance,
+                "direction": direction,
+                "demo": True,
+            })
+    return markers
+
+
 def _clamp_score(value):
     return min(1.0, max(0.0, value))
 
@@ -454,7 +486,7 @@ def create_app(test_config=None):
         covered = request.args.get("covered") == "1"
         ev_charging = request.args.get("ev_charging") == "1"
         requested_vehicle = request.args.get("vehicle_type")
-        vehicle_type = requested_vehicle if requested_vehicle is not None else current_user().vehicle_type
+        vehicle_type = requested_vehicle if requested_vehicle is not None else (current_user().vehicle_type or "Any")
         if vehicle_type not in VEHICLE_TYPES and vehicle_type != "Any":
             vehicle_type = current_user().vehicle_type or "Any"
         sort_by = request.args.get("sort", "recommended")
@@ -489,12 +521,12 @@ def create_app(test_config=None):
         except ValueError as error:
             flash(str(error), "error")
         try:
-            radius_km = float(request.args.get("radius_km", "5"))
-            if not math.isfinite(radius_km) or radius_km not in (1, 3, 5, 10, 25, 50):
+            radius_km = float(request.args.get("radius_km", "20"))
+            if not math.isfinite(radius_km) or radius_km not in (5, 10, 15, 20):
                 raise ValueError()
         except ValueError:
-            radius_km = 5
-            flash("Choose a search radius from 1, 3, 5, 10, 25, or 50 km.", "error")
+            radius_km = 20
+            flash("Choose a search radius from 5, 10, 15, or 20 km.", "error")
         max_price = None
         if max_price_raw:
             try:
@@ -506,6 +538,8 @@ def create_app(test_config=None):
                 max_price_raw = ""
 
         results = []
+        if near_latitude is not None:
+            keyword = ""
         for spot in data_store.spots_db:
             available = data_store.available_slots_for_window(spot, start_time, end_time)
             availability[spot.spot_id] = available
@@ -559,9 +593,15 @@ def create_app(test_config=None):
                 "price": format(spot.price_per_hour, ".2f"),
                 "vehicle_types": spot.vehicle_types,
                 "url": url_for("spots", location=spot.location),
+                "demo": False,
             }
             for spot in results if spot.latitude is not None and spot.longitude is not None
         ]
+        demo_markers = (
+            _demo_area_markers(near_latitude, near_longitude, radius_km)
+            if near_latitude is not None else []
+        )
+        map_markers.extend(demo_markers)
         if sort_by == "price":
             results.sort(key=lambda item: item.price_per_hour)
         elif sort_by == "rating":
@@ -577,6 +617,7 @@ def create_app(test_config=None):
             distances=distances,
             recommendation_scores=recommendation_scores,
             map_markers=map_markers,
+            demo_markers=demo_markers,
             vehicle_types=VEHICLE_TYPES,
             active_spot_count=sum(1 for spot in data_store.spots_db if spot.is_active),
             filters={"location": request.args.get("location", ""),

@@ -47,6 +47,23 @@
     }
   }
 
+  function findPlace(query) {
+    return fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" +
+      encodeURIComponent(query), { headers: { "Accept": "application/json" } })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("Place search returned HTTP " + response.status);
+        }
+        return response.json();
+      })
+      .then(function (places) {
+        if (!places.length) {
+          throw new Error("No matching place was found.");
+        }
+        return places[0];
+      });
+  }
+
   function initializeMap(mapElement) {
     if (!window.L) {
       setStatus(mapElement.id, "Map library could not load. Check your internet connection and reload.");
@@ -101,19 +118,39 @@
           if (!Number.isFinite(item.latitude) || !Number.isFinite(item.longitude)) {
             return;
           }
-          var marker = window.L.marker([item.latitude, item.longitude]).addTo(map);
+          var marker;
+          if (item.demo) {
+            marker = window.L.circleMarker([item.latitude, item.longitude], {
+              radius: 7,
+              color: "#a8580a",
+              weight: 2,
+              dashArray: "3 3",
+              fillColor: "#f6ad55",
+              fillOpacity: 0.8
+            }).addTo(map);
+          } else {
+            marker = window.L.marker([item.latitude, item.longitude]).addTo(map);
+          }
           markerLocations.push([item.latitude, item.longitude]);
           var popup = document.createElement("div");
           var label = document.createElement("strong");
           label.textContent = item.label;
           var details = document.createElement("p");
-          details.textContent = "₹" + item.price + " / hour · Fits " +
-            item.vehicle_types.join(", ");
+          if (item.demo) {
+            details.textContent = item.distance_km +
+              " km area coverage sample. Not a real parking space; no real availability or price.";
+          } else {
+            details.textContent = "₹" + item.price + " / hour · Fits " +
+              item.vehicle_types.join(", ");
+          }
           popup.appendChild(label);
           popup.appendChild(details);
           marker.bindPopup(popup);
         });
-        if (!selectedCoordinates && markerLocations.length) {
+        if (selectedCoordinates) {
+          markerLocations.push(selectedCoordinates);
+        }
+        if (markerLocations.length) {
           map.fitBounds(markerLocations, { padding: [20, 20], maxZoom: 13 });
         }
       } catch (error) {
@@ -139,37 +176,28 @@
     }
     button.disabled = true;
     setStatus(mapElement.id, "Finding that place...");
-    fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" +
-      encodeURIComponent(query), { headers: { "Accept": "application/json" } })
-      .then(function (response) {
-        if (!response.ok) {
-          throw new Error("Place search returned HTTP " + response.status);
-        }
-        return response.json();
-      })
-      .then(function (places) {
-        if (!places.length) {
-          setStatus(mapElement.id, "No matching place found. Try a nearby street or area.");
-          return;
-        }
-        var latitude = Number(places[0].lat);
-        var longitude = Number(places[0].lon);
+    findPlace(query)
+      .then(function (place) {
+        var latitude = Number(place.lat);
+        var longitude = Number(place.lon);
         var pin = mapElement._parkingPin;
         writeCoordinates(mapElement, pin, latitude, longitude);
         if (mapElement.dataset.mapMode === "picker") {
           var locationInput = document.getElementById(mapElement.dataset.locationInput);
           if (locationInput && !locationInput.value.trim()) {
-            locationInput.value = places[0].display_name.slice(0, 120);
+            locationInput.value = place.display_name.slice(0, 120);
           }
-          setStatus(mapElement.id, "Found " + places[0].display_name +
+          setStatus(mapElement.id, "Found " + place.display_name +
             ". Adjust the pin to the exact parking entrance.");
         } else {
-          setStatus(mapElement.id, "Found " + places[0].display_name +
-            ". Choose a radius, then search this area.");
+          setStatus(mapElement.id, "Found " + place.display_name +
+            ". Choose a radius and search. Amber pins are demo-only, not real parking.");
         }
       })
-      .catch(function () {
-        setStatus(mapElement.id, "Place search is temporarily unavailable. Click the map to choose the point.");
+      .catch(function (error) {
+        setStatus(mapElement.id, error.message === "No matching place was found." ?
+          "No matching place found. Try a street, neighborhood, or nearby landmark." :
+          "Place search is temporarily unavailable. Click the map to choose the point.");
       })
       .finally(function () {
         button.disabled = false;
@@ -214,6 +242,59 @@
   geocodeButtons = document.querySelectorAll("[data-map-geocode]");
   geocodeButtons.forEach(function (button) {
     button.addEventListener("click", function () { geocode(button); });
+  });
+
+  document.querySelectorAll("form.filter-panel").forEach(function (form) {
+    var locationInput = form.querySelector("#parking-location-query");
+    var latitudeInput = form.querySelector("#nearby-latitude");
+    var longitudeInput = form.querySelector("#nearby-longitude");
+    var mapElement = document.getElementById("nearby-map");
+    var pending = false;
+    locationInput.addEventListener("input", function () {
+      latitudeInput.value = "";
+      longitudeInput.value = "";
+      if (mapElement._parkingPin) {
+        mapElement._parkingPin.remove();
+      }
+      setStatus(mapElement.id, "Place name changed. Submit to find its map location.");
+    });
+    form.addEventListener("submit", function (event) {
+      if (!locationInput || !locationInput.value.trim() ||
+          (latitudeInput.value && longitudeInput.value)) {
+        return;
+      }
+      event.preventDefault();
+      if (pending) {
+        return;
+      }
+      pending = true;
+      var submitter = event.submitter;
+      setStatus(mapElement.id, "Finding the typed place before searching nearby...");
+      findPlace(locationInput.value.trim())
+        .then(function (place) {
+          writeCoordinates(
+            mapElement,
+            mapElement._parkingPin,
+            Number(place.lat),
+            Number(place.lon)
+          );
+          setStatus(mapElement.id, "Found " + place.display_name +
+            ". Searching within the selected radius; amber pins are demo-only.");
+          if (submitter) {
+            form.requestSubmit(submitter);
+          } else {
+            form.requestSubmit();
+          }
+        })
+        .catch(function () {
+          setStatus(mapElement.id,
+            "Could not find that place. Check the spelling or use the map to choose a point.");
+          locationInput.focus();
+        })
+        .finally(function () {
+          pending = false;
+        });
+    });
   });
 
   document.querySelectorAll("[data-map-geolocate]").forEach(function (button) {

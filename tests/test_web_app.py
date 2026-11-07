@@ -11,7 +11,7 @@ import zlib
 import auth_module
 import data_store
 from werkzeug.security import check_password_hash
-from web_app import create_app
+from web_app import _demo_area_markers, _distance_km, create_app
 
 
 class ParkShareWebTests(unittest.TestCase):
@@ -279,7 +279,7 @@ class ParkShareWebTests(unittest.TestCase):
 
         self.register(self.client, "nearby_driver", vehicle_type="Car")
         response = self.client.get(
-            "/spots?near_lat=19.0760&near_lon=72.8777&radius_km=5"
+            "/spots?location=typed+place&near_lat=19.0760&near_lon=72.8777&radius_km=5"
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Central car parking", response.data)
@@ -288,6 +288,11 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertNotIn(b"Far car parking", response.data)
         self.assertIn(b"km away", response.data)
         self.assertIn(b"match", response.data)
+        map_script = self.client.get("/static/parking-map.js")
+        map_script_data = map_script.get_data()
+        map_script.close()
+        self.assertIn(b"Finding the typed place before searching nearby", map_script_data)
+        self.assertIn(b"findPlace(locationInput.value.trim())", map_script_data)
         self.assertLess(
             response.data.index(b"<h2>Nearby car parking</h2>"),
             response.data.index(b"<h2>Central car parking</h2>"),
@@ -312,8 +317,34 @@ class ParkShareWebTests(unittest.TestCase):
         self.register(self.client, "empty_inventory_driver")
         response = self.client.get("/spots")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No parking spots have been listed yet", response.data)
+        self.assertIn(b"No verified parking listings yet", response.data)
         self.assertIn(b"Create a host account", response.data)
+
+    def test_demo_coverage_markers_are_generated_every_five_km_and_never_listed_as_spots(self):
+        markers = _demo_area_markers(19.076, 72.8777, 20)
+        self.assertEqual(len(markers), 32)
+        for distance in (5, 10, 15, 20):
+            ring = [marker for marker in markers if marker["distance_km"] == distance]
+            self.assertEqual(len(ring), 8)
+            for marker in ring:
+                self.assertAlmostEqual(
+                    _distance_km(19.076, 72.8777, marker["latitude"], marker["longitude"]),
+                    distance, delta=0.01,
+                )
+                self.assertTrue(marker["demo"])
+
+        self.register(self.client, "coverage_driver")
+        response = self.client.get(
+            "/spots?near_lat=19.076&near_lon=72.8777&radius_km=20"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"No verified parking listings yet", response.data)
+        self.assertIn(b"Search-area coverage preview", response.data)
+        self.assertIn(b"not real parking spaces", response.data.lower())
+        self.assertIn(b"20 km ring", response.data)
+        self.assertEqual(response.data.count(b"DEMO AREA PIN"), 32)
+        self.assertEqual(data_store.spots_db, [])
+        self.assertEqual(data_store.bookings_db, [])
 
     def test_profile_update_notifications_and_account_deletion_require_password(self):
         self.register(self.client, "profile_driver")
