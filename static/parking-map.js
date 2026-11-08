@@ -49,7 +49,9 @@
 
   function findPlace(query) {
     return fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" +
-      encodeURIComponent(query), { headers: { "Accept": "application/json" } })
+      encodeURIComponent(query) + "&countrycodes=in", {
+        headers: { "Accept": "application/json" }
+      })
       .then(function (response) {
         if (!response.ok) {
           throw new Error("Place search returned HTTP " + response.status);
@@ -170,7 +172,7 @@
   function geocode(button) {
     var input = document.getElementById(button.dataset.mapGeocode);
     var mapElement = document.getElementById(button.dataset.mapTarget);
-    if (!input || !mapElement || !mapElement._parkingLeafletMap) {
+    if (!input || !mapElement || !mapElement._parkingLeafletMap || button.disabled) {
       return;
     }
     var query = input.value.trim();
@@ -246,6 +248,15 @@
   geocodeButtons = document.querySelectorAll("[data-map-geocode]");
   geocodeButtons.forEach(function (button) {
     button.addEventListener("click", function () { geocode(button); });
+    var input = document.getElementById(button.dataset.mapGeocode);
+    if (input) {
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          geocode(button);
+        }
+      });
+    }
   });
 
   document.querySelectorAll("form.filter-panel").forEach(function (form) {
