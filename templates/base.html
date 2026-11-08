@@ -28,6 +28,8 @@
           <button class="nav-logout" type="submit">Sign out</button>
         </form>
       {% else %}
+        <a href="{{ url_for('spots') }}">Find parking</a>
+        {% if has_guest_bookings %}<a href="{{ url_for('bookings') }}">Guest bookings</a>{% endif %}
         <a href="{{ url_for('login') }}">Sign in</a>
         <a class="nav-cta" href="{{ url_for('register') }}">Create account</a>
       {% endif %}
