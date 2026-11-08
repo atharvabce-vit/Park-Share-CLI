@@ -4,7 +4,9 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 
 ## What it can do
 
-- **Driver and host accounts:** Choose an account type and create a profile. Drivers can add their vehicle type and optional plate; hosts can publish and manage parking listings.
+- **Browse and book without an account:** Visitors can browse listings and make simulated guest bookings. Guest booking history is available only in the same browser session. Registration is optional for drivers and required to publish and manage real host listings.
+- **Real listings by default:** The browser app shows parking published by registered hosts. Built-in sample listings across 25 major Indian cities are disabled by default and can be enabled only for a local demo.
+- **TomTom parking discovery:** When configured with licensed TomTom access, nearby parking facilities and their provider-reported availability are shown separately from ParkShare host listings. Provider facilities are discovery-only; ParkShare cannot reserve them.
 - **Safer signup:** Password confirmation, password-strength guidance, profile validation, CSRF-protected forms, and hashed passwords.
 - **Find a space:** Select an area on an interactive Leaflet map, search a place name, or optionally use browser location. Filter geo-tagged spaces by 1, 3, 5, 10, 25, or 50 km, time, price, amenities, and vehicle. See map pins, distance, compatible vehicles, and a 0–100 recommendation score.
 - **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
@@ -17,15 +19,18 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 ### Map search and recommendations
 
 1. A host signs in, opens **My listings**, enters the listing's location, and selects **Find location on map** or clicks the map to place the pin. The pin can be dragged to the parking entrance. A pin is required to publish a new web listing.
-2. A driver opens **Find parking**, types a place name and submits (the app geocodes it), clicks a point on the map, or selects **Use my location** and grants browser permission. Pick a radius of 5, 10, 15, or 20 km; the default is 20 km. Select **Search this area**. A driver with a registered vehicle sees compatible spaces by default; choose **Any vehicle** to include all vehicle types.
+2. Anyone can open **Find parking** without signing in, type a place name and submit (the app geocodes it), click a point on the map, or select **Use my location** and grant browser permission. Pick a radius of 5, 10, 15, or 20 km; the default is 20 km. Select **Search this area**. A driver with a registered vehicle sees compatible spaces by default; visitors can choose a vehicle type when making a guest booking.
 3. Matching host listings appear as cards and map markers. The recommended sort calculates a score from distance (35%), available capacity for the selected time window (25%), relative hourly price among the filtered results (20%), and rating (20%). Unrated listings receive a neutral rating component. Use the other sort options to sort by price, rating, or availability instead. This is a ParkShare ranking, not a guarantee of suitability.
-4. If no host listings match, the map can show generated amber **demo coverage pins** in eight directions on each 5 km ring up to the selected radius (up to 32 at 20 km). These are clearly labeled **DEMO AREA PIN** search-coverage examples, not parking locations. They are generated per search, are not saved as listings, have no verified rates/capacity, and cannot be booked. They must not be used to navigate to or rely on for parking. Add real host listings to see genuine bookable spaces.
+4. In the normal mode, only host-published listings are shown as bookable parking. If you explicitly enable demo mode, built-in sample listings appear with a **BUILT-IN SAMPLE · NOT REAL PARKING** warning. Their locations, rates, capacity, and bookings are simulated; do not travel to them or rely on them for parking. The map may also show generated amber **demo coverage pins**, which are never listings and cannot be booked.
 
-ParkShare stores the selected latitude and longitude in SQLite; it does not automatically infer exact coordinates from the typed location. Map tiles come from OpenStreetMap and place-name search uses Nominatim, so map display and place search need internet access. Browser geolocation is optional, requires permission, and generally needs a secure context (localhost is allowed). The browser sends the typed place-name query to Nominatim when **Find location on map** is used. If there are no active host listings, the driver page explains that a host must publish a space first.
+ParkShare stores the selected latitude and longitude in SQLite; it does not automatically infer exact coordinates from the typed location. Map tiles come from OpenStreetMap and place-name search uses Nominatim, so map display and place search need internet access. These services provide map/search functionality, not live parking inventory or availability. Browser geolocation is optional, requires permission, and generally needs a secure context (localhost is allowed). The browser sends the typed place-name query to Nominatim when **Find location on map** is used.
+
+TomTom Parking Availability supports India and reports off-street availability refreshed approximately every 10 minutes. TomTom requires a separately approved commercial entitlement for its Parking API; it is not included in its free evaluation or Pay As You Grow plans. Request access through the [TomTom Parking API docs](https://docs.tomtom.com/parking-api/documentation/product-information/introduction). The app uses TomTom Search to find nearby facilities and the Parking Availability service when the required API key and entitlement are configured. Availability can be absent for a facility or region; in that case, the app shows that live status is unavailable rather than assuming spaces are free. The integration does not make reservations or process payments.
 
 ### Bookings, accounts, and host analytics
 
 - Booking search availability is calculated for the selected start time and duration. A slot cannot be double-booked during overlapping reservation windows. A reservation is capped at 168 hours and can start up to 30 days in advance.
+- Guest bookings require a name and vehicle type and can be viewed, cancelled, or checked out only in the browser session that created them. Clearing that session removes access to the guest booking history. Creating an account is recommended for persistent booking history.
 - Checkout, ratings, discounts, and earnings are demo features; ParkShare does not process real payments.
 - Listing photos are stored locally in `static/uploads` (JPG, PNG, or WebP, maximum 5 MB). Listing coordinates, accounts, ratings, bookings, activity, and notifications are stored in the SQLite database.
 - Hosts receive in-app notifications for booking, cancellation, and checkout events. Profile changes and account deletion are available from **Profile**; account deletion requires the current password and no active bookings.
@@ -49,7 +54,7 @@ Requires Python and pip.
    python web_app.py
    ```
 
-3. Open [http://127.0.0.1:5001](http://127.0.0.1:5001) in your browser and choose **Create account**. If you did not set `PARKSHARE_PORT`, use [http://127.0.0.1:5000](http://127.0.0.1:5000).
+3. Open [http://127.0.0.1:5001](http://127.0.0.1:5001) in your browser to browse host listings and try guest bookings, or choose **Create account** to register as a driver or host. If you did not set `PARKSHARE_PORT`, use [http://127.0.0.1:5000](http://127.0.0.1:5000).
 
 Choose another available port if needed:
 
@@ -59,6 +64,10 @@ python web_app.py
 ```
 
 `PARKSHARE_HOST` changes the bind address. `PARKSHARE_PUBLIC_URL` sets the public base URL used in password-reset links. `PARKSHARE_DATABASE` selects the SQLite file; by default it is `instance/parkshare.sqlite3`. Set environment variables in the same PowerShell window before starting the server.
+
+Sample inventory is off by default. To enable the clearly labeled, simulated listings for a local demo, set `$env:PARKSHARE_DEMO_MODE = "1"` before starting the server. Set it to `"0"` (or remove it) to return to normal mode; built-in samples will be hidden and cannot be booked. Host-created listings remain available in either mode.
+
+To enable TomTom discovery after TomTom grants the required API access, set `$env:PARKSHARE_TOMTOM_API_KEY` to your key before launching the server. The integration only searches within the selected map pin and radius, requests up to five nearby facilities, and displays provider availability if returned. Do not commit the key. TomTom data is not used as a ParkShare booking or host listing.
 
 Signup lets you choose **Find parking** (Driver) or **Share my space** (Host). Driver profiles ask for a vehicle type so the app can filter out incompatible parking spaces. Passwords must be at least eight characters and include a number.
 
