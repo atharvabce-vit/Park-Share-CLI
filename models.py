@@ -16,7 +16,7 @@ class User:
 class ParkingSpot:
     def __init__(self, spot_id, location, price_per_hour, host_username, total_slots,
                  description="", covered=False, ev_charging=False, vehicle_types=None,
-                 photo="", latitude=None, longitude=None):
+                 photo="", latitude=None, longitude=None, is_demo=False):
         self.spot_id = spot_id
         self.location = location
         self.price_per_hour = price_per_hour
@@ -32,6 +32,7 @@ class ParkingSpot:
         self.photo = photo
         self.latitude = latitude
         self.longitude = longitude
+        self.is_demo = is_demo
 
     def has_slots(self):
         return self.available_slots > 0
@@ -55,7 +56,8 @@ class ParkingSpot:
 
 class Booking:
     def __init__(self, booking_id, spot_id, driver_username, planned_hours, price_per_hour,
-                 entry_time, slot_number=None, start_time=None, end_time=None):
+                 entry_time, slot_number=None, start_time=None, end_time=None,
+                 guest_name="", guest_id=""):
         self.booking_id = booking_id
         self.spot_id = spot_id
         self.driver_username = driver_username
@@ -65,6 +67,8 @@ class Booking:
         self.start_time = start_time or entry_time
         self.end_time = end_time or (self.start_time + timedelta(hours=planned_hours))
         self.slot_number = slot_number
+        self.guest_name = guest_name
+        self.guest_id = guest_id
         self.exit_time = None
         self.billed_hours = None
         self.final_cost = None
