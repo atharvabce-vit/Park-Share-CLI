@@ -136,7 +136,11 @@
           var label = document.createElement("strong");
           label.textContent = item.label;
           var details = document.createElement("p");
-          if (item.demo) {
+          if (item.sample) {
+            details.textContent = "Built-in sample listing only. Not a real parking space; location, price, and availability are simulated.";
+          } else if (item.external) {
+            details.textContent = "TomTom parking facility. Check its displayed availability before travelling. ParkShare cannot reserve this facility.";
+          } else if (item.demo) {
             details.textContent = item.distance_km +
               " km area coverage sample. Not a real parking space; no real availability or price.";
           } else {
