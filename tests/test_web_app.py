@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from io import BytesIO
+from unittest.mock import patch
 import zlib
 
 import auth_module
@@ -18,11 +19,13 @@ class ParkShareWebTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
-        data_store.configure_storage(os.path.join(self.temp_dir.name, "test.sqlite3"))
+        self.database_path = os.path.join(self.temp_dir.name, "test.sqlite3")
+        data_store.configure_storage(self.database_path)
         data_store.reset_data()
         self.app = create_app({
             "TESTING": True,
             "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
             "UPLOAD_FOLDER": os.path.join(self.temp_dir.name, "uploads"),
             "PASSWORD_RESET_SENDER": lambda email, reset_url: None,
         })
@@ -73,6 +76,147 @@ class ParkShareWebTests(unittest.TestCase):
         response = self.client.post("/register", data={"username": "bad"})
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("bad", data_store.users_db)
+
+    def test_guest_can_browse_book_and_manage_a_sample_listing(self):
+        self.app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": True,
+            "UPLOAD_FOLDER": os.path.join(self.temp_dir.name, "uploads"),
+        })
+        self.client = self.app.test_client()
+        seeded_count = len(data_store.spots_db)
+        data_store.configure_builtin_listings(True)
+        self.assertEqual(len(data_store.spots_db), seeded_count)
+        self.assertGreaterEqual(seeded_count, 20)
+        self.assertTrue(all(spot.is_demo for spot in data_store.spots_db))
+
+        browse = self.client.get("/spots")
+        self.assertEqual(browse.status_code, 200)
+        self.assertIn(b"BUILT-IN SAMPLE", browse.data)
+        spot = data_store.spots_db[0]
+        response = self.client.post("/bookings/create", data={
+            "csrf_token": self.csrf(browse),
+            "spot_id": str(spot.spot_id),
+            "guest_name": "Guest Driver",
+            "vehicle_type": "Car",
+            "start_time": (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
+            "hours": "1",
+        }, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        data_store.configure_storage(self.database_path)
+        booking = data_store.bookings_db[0]
+        self.assertEqual(booking.guest_name, "Guest Driver")
+        self.assertTrue(booking.guest_id)
+        self.assertIn(b"Guest Driver", response.data)
+        self.assertIn(b"Guest bookings", response.data)
+
+        other_client = self.app.test_client()
+        other_page = other_client.get("/spots")
+        self.assertNotIn(b"Guest Driver", other_client.get("/bookings").data)
+        forbidden = other_client.post(
+            "/bookings/" + str(booking.booking_id) + "/cancel",
+            data={"csrf_token": self.csrf(other_page)},
+        )
+        self.assertEqual(forbidden.status_code, 404)
+
+        booking_page = self.client.get("/bookings")
+        cancelled = self.client.post(
+            "/bookings/" + str(booking.booking_id) + "/cancel",
+            data={"csrf_token": self.csrf(booking_page)},
+            follow_redirects=True,
+        )
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(booking.status, "Cancelled")
+
+    def test_sample_listings_are_off_by_default_and_disabled_samples_cannot_be_booked(self):
+        demo_app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": True,
+        })
+        self.assertTrue(any(spot.is_demo and spot.is_active for spot in data_store.spots_db))
+
+        normal_app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+        })
+        self.assertFalse(any(spot.is_demo and spot.is_active for spot in data_store.spots_db))
+        normal_client = normal_app.test_client()
+        response = normal_client.get("/spots")
+        self.assertNotIn(b"BUILT-IN SAMPLE", response.data)
+        self.assertIn(b"No parking listings match yet", response.data)
+
+        spot = next(spot for spot in data_store.spots_db if spot.is_demo)
+        booking_form = normal_client.get("/register")
+        rejected = normal_client.post("/bookings/create", data={
+            "csrf_token": self.csrf(booking_form),
+            "spot_id": str(spot.spot_id),
+            "guest_name": "Guest Driver",
+            "vehicle_type": "Car",
+            "start_time": (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
+            "hours": "1",
+        }, follow_redirects=True)
+        self.assertIn(b"That spot is no longer available.", rejected.data)
+        self.assertEqual(data_store.bookings_db, [])
+
+    @patch("tomtom_parking.search_nearby")
+    def test_tomtom_facilities_are_discovery_only(self, search_nearby):
+        search_nearby.return_value = [{
+            "id": "provider-facility-1",
+            "name": "Example Public Garage",
+            "address": "Central Mumbai",
+            "latitude": 19.076,
+            "longitude": 72.8777,
+            "distance_km": 0.4,
+            "availability": True,
+            "empty_spots": 3,
+            "updated_at": "2026-11-08T06:30:00Z",
+        }]
+        provider_app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+            "TOMTOM_API_KEY": "test-provider-key",
+        })
+        client = provider_app.test_client()
+        response = client.get(
+            "/spots?near_lat=19.076&near_lon=72.8777&radius_km=5"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Example Public Garage", response.data)
+        self.assertIn(b"3 spaces reported free", response.data)
+        self.assertIn(b"ParkShare cannot reserve a space there", response.data)
+        self.assertNotIn(b'name="spot_id" value="provider-facility-1"', response.data)
+        search_nearby.assert_called_once_with(19.076, 72.8777, 5.0, "test-provider-key")
+
+    @patch("tomtom_parking._get_json")
+    def test_tomtom_adapter_uses_search_availability_and_validates_results(self, get_json):
+        get_json.side_effect = [
+            {"results": [{
+                "id": "facility-1",
+                "poi": {"name": "Central Garage"},
+                "address": {"freeformAddress": "Mumbai"},
+                "position": {"lat": 19.076, "lon": 72.8777},
+                "dist": 420,
+                "dataSources": {"parkingAvailability": {"id": "availability-1"}},
+            }]},
+            {"statuses": [{"current": {
+                "available": True,
+                "emptySpots": 4,
+                "updatedAt": "2026-11-08T06:30:00Z",
+            }}]},
+        ]
+        from tomtom_parking import search_nearby
+
+        facilities = search_nearby(19.076, 72.8777, 5, "test-key")
+        self.assertEqual(len(facilities), 1)
+        self.assertEqual(facilities[0]["name"], "Central Garage")
+        self.assertEqual(facilities[0]["distance_km"], 0.4)
+        self.assertTrue(facilities[0]["availability"])
+        self.assertEqual(facilities[0]["empty_spots"], 4)
+        self.assertEqual(get_json.call_count, 2)
 
     def test_registration_validation_keeps_profile_fields(self):
         response = self.client.get("/register")
@@ -317,7 +461,7 @@ class ParkShareWebTests(unittest.TestCase):
         self.register(self.client, "empty_inventory_driver")
         response = self.client.get("/spots")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No verified parking listings yet", response.data)
+        self.assertIn(b"No parking listings match yet", response.data)
         self.assertIn(b"Create a host account", response.data)
 
     def test_demo_coverage_markers_are_generated_every_five_km_and_never_listed_as_spots(self):
@@ -338,7 +482,7 @@ class ParkShareWebTests(unittest.TestCase):
             "/spots?near_lat=19.076&near_lon=72.8777&radius_km=20"
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No verified parking listings yet", response.data)
+        self.assertIn(b"No parking listings match yet", response.data)
         self.assertIn(b"Search-area coverage preview", response.data)
         self.assertIn(b"not real parking spaces", response.data.lower())
         self.assertIn(b"20 km ring", response.data)
