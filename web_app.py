@@ -18,6 +18,7 @@ from flask import Flask, abort, current_app, flash, redirect, render_template, r
 import auth_module
 import billing_module
 import data_store
+import tomtom_parking
 from models import ParkingSpot, Booking
 from werkzeug.security import generate_password_hash
 
@@ -176,6 +177,9 @@ def create_app(test_config=None):
         SESSION_COOKIE_SAMESITE="Lax",
         MAX_CONTENT_LENGTH=MAX_PHOTO_BYTES + 1024 * 1024,
         UPLOAD_FOLDER=str(Path(app.static_folder) / "uploads"),
+        DEMO_MODE=os.environ.get("PARKSHARE_DEMO_MODE", "").strip().lower()
+        in ("1", "true", "yes", "on"),
+        TOMTOM_API_KEY=os.environ.get("PARKSHARE_TOMTOM_API_KEY", "").strip(),
         PUBLIC_URL=os.environ.get(
             "PARKSHARE_PUBLIC_URL",
             "http://127.0.0.1:" + os.environ.get("PARKSHARE_PORT", "5000"),
@@ -183,6 +187,7 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+    data_store.configure_builtin_listings(app.config["DEMO_MODE"])
 
     def current_user():
         username = session.get("username")
@@ -212,6 +217,13 @@ def create_app(test_config=None):
             return wrapped
         return decorate
 
+    def owns_booking(booking):
+        user = current_user()
+        if user is not None:
+            return user.role == "Driver" and booking.driver_username == user.username
+        guest_id = session.get("guest_id")
+        return bool(guest_id and booking.guest_id == guest_id)
+
     @app.before_request
     def protect_forms():
         if request.method == "POST":
@@ -231,6 +243,10 @@ def create_app(test_config=None):
             "csrf_token": csrf_token,
             "find_spot": data_store.find_spot,
             "signed_in_user": user,
+            "guest_name": session.get("guest_name", ""),
+            "has_guest_bookings": bool(session.get("guest_id")),
+            "demo_mode": current_app.config["DEMO_MODE"],
+            "tomtom_enabled": bool(current_app.config["TOMTOM_API_KEY"]),
             "unread_notifications": sum(
                 1 for item in data_store.notifications
                 if user and item["username"] == user.username and not item["read"]
@@ -246,7 +262,9 @@ def create_app(test_config=None):
             return redirect(url_for("dashboard"))
         active_spots = [spot for spot in data_store.spots_db if spot.is_active]
         available_slots = sum(spot.available_slots for spot in active_spots)
-        return render_template("landing.html", spot_count=len(active_spots), available_slots=available_slots)
+        return render_template(
+            "landing.html", spot_count=len(active_spots), available_slots=available_slots
+        )
 
     @app.route("/register", methods=["GET", "POST"])
     def register():
@@ -479,16 +497,18 @@ def create_app(test_config=None):
         )
 
     @app.route("/spots")
-    @login_required
     def spots():
+        user = current_user()
         keyword = request.args.get("location", "").strip().lower()
         max_price_raw = request.args.get("max_price", "").strip()
         covered = request.args.get("covered") == "1"
         ev_charging = request.args.get("ev_charging") == "1"
         requested_vehicle = request.args.get("vehicle_type")
-        vehicle_type = requested_vehicle if requested_vehicle is not None else (current_user().vehicle_type or "Any")
+        vehicle_type = requested_vehicle if requested_vehicle is not None else (
+            user.vehicle_type or "Any" if user else "Any"
+        )
         if vehicle_type not in VEHICLE_TYPES and vehicle_type != "Any":
-            vehicle_type = current_user().vehicle_type or "Any"
+            vehicle_type = user.vehicle_type or "Any" if user else "Any"
         sort_by = request.args.get("sort", "recommended")
         requested_hours = request.args.get("hours", "1")
         try:
@@ -594,6 +614,7 @@ def create_app(test_config=None):
                 "vehicle_types": spot.vehicle_types,
                 "url": url_for("spots", location=spot.location),
                 "demo": False,
+                "sample": spot.is_demo,
             }
             for spot in results if spot.latitude is not None and spot.longitude is not None
         ]
@@ -602,6 +623,31 @@ def create_app(test_config=None):
             if near_latitude is not None else []
         )
         map_markers.extend(demo_markers)
+        provider_facilities = []
+        if current_app.config["TOMTOM_API_KEY"] and near_latitude is not None:
+            try:
+                provider_facilities = tomtom_parking.search_nearby(
+                    near_latitude,
+                    near_longitude,
+                    radius_km,
+                    current_app.config["TOMTOM_API_KEY"],
+                )
+            except tomtom_parking.TomTomParkingError as error:
+                app.logger.warning("TomTom parking search failed: %s", error)
+                flash(
+                    "Live parking data could not be loaded. Host listings are still available.",
+                    "error",
+                )
+            map_markers.extend(
+                {
+                    "latitude": facility["latitude"],
+                    "longitude": facility["longitude"],
+                    "label": facility["name"],
+                    "provider": "TomTom",
+                    "external": True,
+                }
+                for facility in provider_facilities
+            )
         if sort_by == "price":
             results.sort(key=lambda item: item.price_per_hour)
         elif sort_by == "rating":
@@ -617,6 +663,7 @@ def create_app(test_config=None):
             distances=distances,
             recommendation_scores=recommendation_scores,
             map_markers=map_markers,
+            provider_facilities=provider_facilities,
             demo_markers=demo_markers,
             vehicle_types=VEHICLE_TYPES,
             active_spot_count=sum(1 for spot in data_store.spots_db if spot.is_active),
@@ -736,17 +783,26 @@ def create_app(test_config=None):
         return redirect(url_for("host_spots"))
 
     @app.route("/bookings")
-    @login_required
     def bookings():
         user = current_user()
-        mine = [booking for booking in data_store.bookings_db
-                if (booking.driver_username == user.username if user.role == "Driver"
-                    else data_store.find_spot(booking.spot_id).host_username == user.username)]
+        if user is None:
+            guest_id = session.get("guest_id", "")
+            mine = [booking for booking in data_store.bookings_db
+                    if guest_id and booking.guest_id == guest_id]
+        elif user.role == "Driver":
+            mine = [booking for booking in data_store.bookings_db
+                    if booking.driver_username == user.username]
+        else:
+            mine = [booking for booking in data_store.bookings_db
+                    if data_store.find_spot(booking.spot_id).host_username == user.username]
         return render_template("bookings.html", bookings=mine)
 
     @app.route("/bookings/create", methods=["POST"])
-    @role_required("Driver")
     def create_booking():
+        user = current_user()
+        if user and user.role != "Driver":
+            flash("Hosts cannot book parking spaces from a host account.", "error")
+            return redirect(url_for("spots"))
         try:
             spot_id = int(request.form.get("spot_id", ""))
             hours = int(request.form.get("hours", ""))
@@ -761,13 +817,29 @@ def create_app(test_config=None):
             flash("Choose a start time within the next 30 days.", "error")
             return redirect(url_for("spots"))
         end_time = start_time + timedelta(hours=hours)
+        guest_name = ""
+        guest_id = ""
+        if user is None:
+            guest_name = request.form.get("guest_name", "").strip()
+            if not guest_name or len(guest_name) > 80:
+                flash("Enter your name (up to 80 characters) to make a guest booking.", "error")
+                return redirect(url_for("spots"))
+            vehicle_type = request.form.get("vehicle_type", "")
+            if vehicle_type not in VEHICLE_TYPES:
+                flash("Choose a supported vehicle type for your guest booking.", "error")
+                return redirect(url_for("spots"))
+            guest_id = session.setdefault("guest_id", uuid.uuid4().hex)
+            session["guest_name"] = guest_name
+        else:
+            vehicle_type = user.vehicle_type
         with booking_lock:
             spot = data_store.find_spot(spot_id)
-            user = current_user()
-            if spot is None or not spot.is_active:
+            if spot is None or not spot.is_active or (
+                spot.is_demo and not current_app.config["DEMO_MODE"]
+            ):
                 flash("That spot is no longer available.", "error")
                 return redirect(url_for("spots"))
-            if user.vehicle_type and user.vehicle_type not in spot.vehicle_types:
+            if vehicle_type and vehicle_type not in spot.vehicle_types:
                 flash("This spot does not support your registered vehicle type.", "error")
                 return redirect(url_for("spots"))
             slot_number = data_store.free_slot_for_window(spot, start_time, end_time)
@@ -775,46 +847,50 @@ def create_app(test_config=None):
                 flash("No space is available for that time range.", "error")
                 return redirect(url_for("spots"))
             booking = Booking(
-                data_store.next_booking_id(), spot.spot_id, user.username, hours,
+                data_store.next_booking_id(), spot.spot_id,
+                user.username if user else "Guest", hours,
                 spot.price_per_hour, start_time, slot_number, start_time, end_time,
+                guest_name, guest_id,
             )
             data_store.bookings_db.append(booking)
             data_store.refresh_availability(spot)
             data_store.add_notification(
                 spot.host_username,
-                user.username + " booked " + spot.location + " from "
+                (user.username if user else "A guest") + " booked " + spot.location + " from "
                 + start_time.strftime("%d %b %Y %I:%M %p") + ".",
             )
-            data_store.log_event(user.username + " booked spot #" + str(spot.spot_id)
+            data_store.log_event((user.username if user else "A guest") + " booked spot #" + str(spot.spot_id)
                                  + " (slot " + str(slot_number) + ")")
         flash("Booking confirmed — your assigned space is #" + str(slot_number) + ".", "success")
         return redirect(url_for("bookings"))
 
     @app.route("/bookings/<int:booking_id>/cancel", methods=["POST"])
-    @role_required("Driver")
     def cancel_booking(booking_id):
         with booking_lock:
             booking = data_store.find_booking(booking_id)
-            if booking is None or booking.status != "Active" or booking.driver_username != current_user().username:
+            if booking is None or booking.status != "Active" or not owns_booking(booking):
                 abort(404)
+            user = current_user()
+            actor = user.username if user else "Guest"
             booking.status = "Cancelled"
             spot = data_store.find_spot(booking.spot_id)
             data_store.refresh_availability(spot)
             data_store.add_notification(
                 spot.host_username,
-                current_user().username + " cancelled booking #" + str(booking_id) + ".",
+                actor + " cancelled booking #" + str(booking_id) + ".",
             )
-            data_store.log_event(current_user().username + " cancelled booking #" + str(booking_id))
+            data_store.log_event(actor + " cancelled booking #" + str(booking_id))
         flash("Booking cancelled without charge.", "success")
         return redirect(url_for("bookings"))
 
     @app.route("/bookings/<int:booking_id>/checkout", methods=["POST"])
-    @role_required("Driver")
     def checkout(booking_id):
         with booking_lock:
             booking = data_store.find_booking(booking_id)
-            if booking is None or booking.status != "Active" or booking.driver_username != current_user().username:
+            if booking is None or booking.status != "Active" or not owns_booking(booking):
                 abort(404)
+            user = current_user()
+            actor = user.username if user else "Guest"
             if booking.start_time and datetime.now() < booking.start_time:
                 flash("You cannot check out before your booking starts.", "error")
                 return redirect(url_for("bookings"))
@@ -841,13 +917,13 @@ def create_app(test_config=None):
                     rating = None
                 if rating is not None:
                     spot.add_rating(rating)
-                    data_store.log_event(current_user().username + " rated spot #" + str(spot.spot_id)
+                    data_store.log_event(actor + " rated spot #" + str(spot.spot_id)
                                          + " " + str(rating) + "/5")
-            data_store.log_event(current_user().username + " released spot #" + str(spot.spot_id)
+            data_store.log_event(actor + " released spot #" + str(spot.spot_id)
                                  + " | Rs " + str(final_amount))
             data_store.add_notification(
                 spot.host_username,
-                current_user().username + " completed booking #" + str(booking_id) + ".",
+                actor + " completed booking #" + str(booking_id) + ".",
             )
             data_store.persist()
         if promo and not discount:
