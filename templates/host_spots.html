@@ -7,8 +7,8 @@
   <form method="post" action="{{ url_for('host_spots') }}" class="form-panel listing-form" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-heading"><span class="step-tag">NEW LISTING</span><h2>Add a parking space</h2><p>Clear details help the right driver find you.</p></div>
-    <label class="field">Location<input id="new-listing-location" name="location" required maxlength="120" placeholder="e.g. Bandra West, Mumbai"></label>
-    <div class="map-tools"><button class="button secondary" type="button" data-map-geocode="new-listing-location" data-map-target="new-listing-map">Find location on map</button></div>
+    <label class="field">Location in India<input id="new-listing-location" name="location" required maxlength="120" placeholder="e.g. Bandra West, Mumbai" autocomplete="off"></label>
+    <div class="map-tools"><button class="button secondary" type="button" data-map-geocode="new-listing-location" data-map-target="new-listing-map">Show on map</button></div>
     <div class="parking-map" id="new-listing-map" data-parking-map data-map-mode="picker" data-location-input="new-listing-location" data-latitude-input="new-listing-latitude" data-longitude-input="new-listing-longitude"></div>
     <input id="new-listing-latitude" name="latitude" type="hidden"><input id="new-listing-longitude" name="longitude" type="hidden">
     <p class="map-status" data-map-status="new-listing-map" aria-live="polite">Click the map to pin the entrance. A pin is needed for nearby search.</p>
@@ -32,8 +32,8 @@
       <details class="edit-details"><summary>Edit listing details</summary>
         <form method="post" action="{{ url_for('edit_spot', spot_id=spot.spot_id) }}" class="stack-form edit-form" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <label class="field">Location<input id="spot-location-{{ spot.spot_id }}" name="location" value="{{ spot.location }}" required maxlength="120"></label>
-          <div class="map-tools"><button class="button secondary" type="button" data-map-geocode="spot-location-{{ spot.spot_id }}" data-map-target="spot-map-{{ spot.spot_id }}">Find location on map</button></div>
+          <label class="field">Location in India<input id="spot-location-{{ spot.spot_id }}" name="location" value="{{ spot.location }}" required maxlength="120" autocomplete="off"></label>
+          <div class="map-tools"><button class="button secondary" type="button" data-map-geocode="spot-location-{{ spot.spot_id }}" data-map-target="spot-map-{{ spot.spot_id }}">Show on map</button></div>
           <div class="parking-map compact-map" id="spot-map-{{ spot.spot_id }}" data-parking-map data-map-mode="picker" data-location-input="spot-location-{{ spot.spot_id }}" data-latitude-input="spot-latitude-{{ spot.spot_id }}" data-longitude-input="spot-longitude-{{ spot.spot_id }}" data-latitude="{{ spot.latitude if spot.latitude is not none else '' }}" data-longitude="{{ spot.longitude if spot.longitude is not none else '' }}"></div>
           <input id="spot-latitude-{{ spot.spot_id }}" name="latitude" type="hidden" value="{{ spot.latitude if spot.latitude is not none else '' }}"><input id="spot-longitude-{{ spot.spot_id }}" name="longitude" type="hidden" value="{{ spot.longitude if spot.longitude is not none else '' }}">
           <p class="map-status" data-map-status="spot-map-{{ spot.spot_id }}" aria-live="polite">Click the map to pin this parking entrance.</p>
