@@ -24,6 +24,34 @@ _database_path = os.environ.get(
     str(Path(__file__).resolve().parent / "instance" / "parkshare.sqlite3"),
 )
 
+_BUILTIN_DEMO_AREAS = (
+    ("New Delhi", "Connaught Place", 28.6315, 77.2167, 80),
+    ("Mumbai", "Bandra-Kurla Complex", 19.0607, 72.8653, 100),
+    ("Bengaluru", "MG Road", 12.9756, 77.6066, 75),
+    ("Chennai", "T. Nagar", 13.0418, 80.2337, 60),
+    ("Hyderabad", "HITEC City", 17.4435, 78.3772, 70),
+    ("Kolkata", "Park Street", 22.5535, 88.3520, 65),
+    ("Pune", "Hinjawadi", 18.5913, 73.7389, 55),
+    ("Ahmedabad", "SG Highway", 23.0395, 72.5066, 50),
+    ("Jaipur", "MI Road", 26.9124, 75.7873, 45),
+    ("Lucknow", "Hazratganj", 26.8500, 80.9462, 45),
+    ("Surat", "Vesu", 21.1595, 72.7720, 45),
+    ("Indore", "Vijay Nagar", 22.7533, 75.8937, 40),
+    ("Bhopal", "MP Nagar", 23.2334, 77.4304, 40),
+    ("Nagpur", "Sitabuldi", 21.1458, 79.0882, 40),
+    ("Kochi", "Kakkanad", 10.0159, 76.3419, 50),
+    ("Chandigarh", "Sector 17", 30.7415, 76.7821, 50),
+    ("Visakhapatnam", "Dwaraka Nagar", 17.7231, 83.3013, 45),
+    ("Patna", "Boring Road", 25.6126, 85.1198, 35),
+    ("Coimbatore", "Gandhipuram", 11.0168, 76.9558, 40),
+    ("Guwahati", "GS Road", 26.1445, 91.7362, 40),
+    ("Gurugram", "Cyber City", 28.4950, 77.0890, 90),
+    ("Noida", "Sector 18", 28.5708, 77.3261, 70),
+    ("Thane", "Thane West", 19.2183, 72.9781, 60),
+    ("Vadodara", "Alkapuri", 22.3100, 73.1800, 40),
+    ("Varanasi", "Sigra", 25.3176, 82.9739, 40),
+)
+
 
 def _connect():
     Path(_database_path).parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +70,7 @@ def _connect():
             description TEXT NOT NULL, covered INTEGER NOT NULL, ev_charging INTEGER NOT NULL,
             vehicle_types TEXT NOT NULL, available_slots INTEGER NOT NULL,
             is_active INTEGER NOT NULL, photo TEXT NOT NULL,
-            latitude REAL, longitude REAL
+            latitude REAL, longitude REAL, is_demo INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS ratings (
             spot_id INTEGER NOT NULL, rating INTEGER NOT NULL
@@ -52,7 +80,8 @@ def _connect():
             driver_username TEXT NOT NULL, planned_hours INTEGER NOT NULL,
             price_per_hour REAL NOT NULL, entry_time TEXT NOT NULL, slot_number INTEGER,
             exit_time TEXT, billed_hours INTEGER, final_cost REAL, status TEXT NOT NULL,
-            start_time TEXT, end_time TEXT
+            start_time TEXT, end_time TEXT, guest_name TEXT NOT NULL DEFAULT '',
+            guest_id TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS activity_events (
             event_id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, text TEXT NOT NULL
@@ -73,11 +102,17 @@ def _connect():
         connection.execute("ALTER TABLE spots ADD COLUMN latitude REAL")
     if "longitude" not in columns:
         connection.execute("ALTER TABLE spots ADD COLUMN longitude REAL")
+    if "is_demo" not in columns:
+        connection.execute("ALTER TABLE spots ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")
     booking_columns = {row[1] for row in connection.execute("PRAGMA table_info(bookings)")}
     if "start_time" not in booking_columns:
         connection.execute("ALTER TABLE bookings ADD COLUMN start_time TEXT")
     if "end_time" not in booking_columns:
         connection.execute("ALTER TABLE bookings ADD COLUMN end_time TEXT")
+    if "guest_name" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN guest_name TEXT NOT NULL DEFAULT ''")
+    if "guest_id" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN guest_id TEXT NOT NULL DEFAULT ''")
     return connection
 
 
@@ -105,7 +140,7 @@ def _load():
             for row in connection.execute(
                 "SELECT spot_id, location, price, host_username, total_slots, description, "
                 "covered, ev_charging, vehicle_types, available_slots, is_active, photo, "
-                "latitude, longitude FROM spots"
+                "latitude, longitude, is_demo FROM spots"
             ):
                 spot = ParkingSpot(
                     row[0], row[1], row[2], row[3], row[4], row[5],
@@ -116,18 +151,20 @@ def _load():
                 spot.photo = row[11]
                 spot.latitude = row[12]
                 spot.longitude = row[13]
+                spot.is_demo = bool(row[14])
                 spot.ratings = ratings.get(spot.spot_id, [])
                 spots_db.append(spot)
 
             bookings_db[:] = []
             for row in connection.execute(
                 "SELECT booking_id, spot_id, driver_username, planned_hours, price_per_hour, "
-                "entry_time, slot_number, exit_time, billed_hours, final_cost, status, start_time, end_time "
+                "entry_time, slot_number, exit_time, billed_hours, final_cost, status, start_time, end_time, "
+                "guest_name, guest_id "
                 "FROM bookings ORDER BY booking_id"
             ):
                 booking = Booking(
                     row[0], row[1], row[2], row[3], row[4], _parse_time(row[5]), row[6],
-                    _parse_time(row[11]), _parse_time(row[12]),
+                    _parse_time(row[11]), _parse_time(row[12]), row[13], row[14],
                 )
                 booking.exit_time = _parse_time(row[7])
                 booking.billed_hours = row[8]
@@ -186,12 +223,12 @@ def persist():
                 )
                 connection.execute("DELETE FROM spots")
                 connection.executemany(
-                    "INSERT INTO spots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO spots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(spot.spot_id, spot.location, spot.price_per_hour, spot.host_username,
                       spot.total_slots, spot.description, int(spot.covered), int(spot.ev_charging),
                       json.dumps(spot.vehicle_types), spot.available_slots, int(spot.is_active),
                       getattr(spot, "photo", ""), getattr(spot, "latitude", None),
-                      getattr(spot, "longitude", None))
+                      getattr(spot, "longitude", None), int(getattr(spot, "is_demo", False)))
                      for spot in spots_db],
                 )
                 connection.execute("DELETE FROM ratings")
@@ -201,14 +238,15 @@ def persist():
                 )
                 connection.execute("DELETE FROM bookings")
                 connection.executemany(
-                    "INSERT INTO bookings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO bookings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(booking.booking_id, booking.spot_id, booking.driver_username,
                       booking.planned_hours, booking.price_per_hour,
                       booking.entry_time.isoformat(), booking.slot_number,
                       booking.exit_time.isoformat() if booking.exit_time else None,
                       booking.billed_hours, booking.final_cost, booking.status,
                       booking.start_time.isoformat() if booking.start_time else None,
-                      booking.end_time.isoformat() if booking.end_time else None)
+                      booking.end_time.isoformat() if booking.end_time else None,
+                      booking.guest_name, booking.guest_id)
                      for booking in bookings_db],
                 )
                 connection.execute("DELETE FROM activity_events")
@@ -251,6 +289,45 @@ def next_spot_id():
     global _spot_counter
     _spot_counter += 1
     return _spot_counter
+
+
+def configure_builtin_listings(enabled):
+    """Enable or disable clearly marked sample listings for an explicit demo."""
+    demo_spots = [spot for spot in spots_db if spot.is_demo]
+    changed = False
+    if enabled and not demo_spots:
+        description = (
+            "Sample listing for trying ParkShare only. This is not a real or verified "
+            "parking space; availability and booking are simulated."
+        )
+        for city, area, latitude, longitude, price in _BUILTIN_DEMO_AREAS:
+            spots_db.append(ParkingSpot(
+                next_spot_id(),
+                area + ", " + city,
+                price,
+                "builtin_demo_host",
+                3,
+                description,
+                covered=True,
+                vehicle_types=["Car", "Motorcycle", "SUV", "Van"],
+                latitude=latitude,
+                longitude=longitude,
+                is_demo=True,
+            ))
+        demo_spots = [spot for spot in spots_db if spot.is_demo]
+        changed = True
+    for spot in demo_spots:
+        if spot.is_active != enabled:
+            spot.is_active = enabled
+            refresh_availability(spot)
+            changed = True
+        if not enabled:
+            for booking in bookings_db:
+                if booking.spot_id == spot.spot_id and booking.status == "Active":
+                    booking.status = "Cancelled"
+                    changed = True
+    if changed:
+        persist()
 
 
 def next_booking_id():
