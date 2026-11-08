@@ -437,6 +437,9 @@ class ParkShareWebTests(unittest.TestCase):
         map_script.close()
         self.assertIn(b"Finding the typed place before searching nearby", map_script_data)
         self.assertIn(b"findPlace(locationInput.value.trim())", map_script_data)
+        self.assertIn(b"&countrycodes=in", map_script_data)
+        self.assertIn(b'event.key === "Enter"', map_script_data)
+        self.assertIn(b"Show on map", response.data)
         self.assertLess(
             response.data.index(b"<h2>Nearby car parking</h2>"),
             response.data.index(b"<h2>Central car parking</h2>"),
