@@ -3,13 +3,13 @@
 {% block page_head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><link rel="stylesheet" href="{{ url_for('static', filename='parking-map.css') }}">{% endblock %}
 {% block content %}
 <section class="page-heading">
-  <div><span class="eyebrow">PARKING, YOUR WAY</span><h1>Find your next spot.</h1><p>Compare spaces, check the details, and book with confidence.</p></div>
+  <div><span class="eyebrow">PARKING, YOUR WAY</span><h1>Find your next spot.</h1><p>Compare listings and try a simulated guest booking without registering.</p></div>
   <span class="result-count">{{ spots|length }} available</span>
 </section>
 <form class="filter-panel" method="get" action="{{ url_for('spots') }}">
   <label class="field">Location<input id="parking-location-query" name="location" value="{{ filters.location }}" placeholder="Neighborhood or area"></label>
   <label class="field">Max price / hour<input type="number" min="0" step="0.5" name="max_price" value="{{ filters.max_price }}" placeholder="Any price"></label>
-  <label class="field">Vehicle type<select name="vehicle_type"><option value="Any" {% if filters.vehicle_type == "Any" %}selected{% endif %}>Any vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if filters.vehicle_type == kind %}selected{% endif %}>{{ kind }}{% if signed_in_user.vehicle_type == kind %} · your vehicle{% endif %}</option>{% endfor %}</select></label>
+  <label class="field">Vehicle type<select name="vehicle_type"><option value="Any" {% if filters.vehicle_type == "Any" %}selected{% endif %}>Any vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if filters.vehicle_type == kind %}selected{% endif %}>{{ kind }}{% if signed_in_user and signed_in_user.vehicle_type == kind %} · your vehicle{% endif %}</option>{% endfor %}</select></label>
   <label class="field">Sort by<select name="sort"><option value="recommended" {% if filters.sort == "recommended" %}selected{% endif %}>Recommended</option><option value="price" {% if filters.sort == "price" %}selected{% endif %}>Price: low to high</option><option value="rating" {% if filters.sort == "rating" %}selected{% endif %}>Top rated</option><option value="availability" {% if filters.sort == "availability" %}selected{% endif %}>Most spaces</option></select></label>
   <label class="field">Start time<input type="datetime-local" name="start_time" min="{{ filters.minimum_start }}" value="{{ filters.start_time }}"></label>
   <label class="field">Duration (hours)<input type="number" name="hours" min="1" max="168" value="{{ filters.hours }}"></label>
@@ -34,31 +34,62 @@
     <div class="spot-visual">{% if spot.photo %}<img src="{{ url_for('static', filename=spot.photo) }}" alt="Parking at {{ spot.location }}">{% else %}<span class="spot-visual-icon">⌖</span>{% endif %}<span class="badge available">{{ availability[spot.spot_id] }} / {{ spot.total_slots }} open for this time</span></div>
     <div class="spot-body">
       <div class="spot-title"><h2>{{ spot.location }}</h2><span class="rating">★ {{ spot.average_rating() if spot.average_rating() is not none else "New" }}</span></div>
+      {% if spot.is_demo %}<p class="demo-listing-label"><strong>BUILT-IN SAMPLE · NOT REAL PARKING</strong><br>Illustrative location, price, availability, and booking only. Do not travel here for parking.</p>{% endif %}
       <p class="recommendation-meta">{% if distances.get(spot.spot_id) is not none %}{{ "%.1f"|format(distances[spot.spot_id]) }} km away · {% endif %}{{ recommendation_scores[spot.spot_id] }}% match · Fits {{ spot.vehicle_types|join(", ") }}</p>
       <p>{{ spot.description or "A convenient local parking space, ready when you are." }}</p>
-      <a class="text-link" href="{{ map_url(spot.location) }}" target="_blank" rel="noopener noreferrer">Open location in OpenStreetMap →</a>
+      {% if not spot.is_demo %}<a class="text-link" href="{{ map_url(spot.location) }}" target="_blank" rel="noopener noreferrer">Open location in OpenStreetMap →</a>{% endif %}
       <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
-      <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>Host · {{ spot.host_username }}</span></div>
-      {% if signed_in_user.role == "Driver" %}
+      <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>{% if spot.is_demo %}Built-in demo host{% else %}Host · {{ spot.host_username }}{% endif %}</span></div>
+      {% if signed_in_user and signed_in_user.role == "Driver" or not signed_in_user %}
       <form method="post" action="{{ url_for('create_booking') }}" class="book-row">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="spot_id" value="{{ spot.spot_id }}">
         <label class="sr-only" for="start-{{ spot.spot_id }}">Start time</label><input id="start-{{ spot.spot_id }}" name="start_time" type="datetime-local" min="{{ filters.minimum_start }}" value="{{ filters.start_time }}" required>
         <label class="sr-only" for="hours-{{ spot.spot_id }}">Hours</label><input id="hours-{{ spot.spot_id }}" name="hours" type="number" min="1" max="168" value="{{ filters.hours }}" required>
+        {% if not signed_in_user %}
+        <label class="field" for="guest-name-{{ spot.spot_id }}">Your name<input id="guest-name-{{ spot.spot_id }}" name="guest_name" maxlength="80" value="{{ guest_name }}" required></label>
+        <label class="field" for="guest-vehicle-{{ spot.spot_id }}">Vehicle type<select id="guest-vehicle-{{ spot.spot_id }}" name="vehicle_type" required>{% for kind in vehicle_types %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}</select></label>
+        {% endif %}
         <button class="button primary" type="submit">Book this spot</button>
       </form>
+      {% if not signed_in_user %}<small>Guest bookings are saved in this browser session. Built-in sample listings and bookings are simulations only.</small>{% endif %}
       {% endif %}
     </div>
   </article>
   {% endfor %}
 </section>
 {% else %}
-<section class="empty-state"><span>⌕</span>{% if active_spot_count == 0 %}<h2>No verified parking listings yet</h2><p>There are no live host listings in ParkShare. Search with a map pin to see clearly marked demo coverage samples; these are not real parking spaces or availability.</p><a class="button ghost" href="{{ url_for('register') }}">Create a host account</a>{% else %}<h2>No verified spots match those filters</h2><p>Try another vehicle, area, time, or radius. Demo pins show search coverage only and cannot be booked.</p><a class="button ghost" href="{{ url_for('spots') }}">Clear filters</a>{% endif %}</section>
+<section class="empty-state"><span>⌕</span>{% if active_spot_count == 0 %}<h2>No parking listings match yet</h2><p>Try another area or search with a map pin. You can also register as a host to add a real listing.</p><a class="button ghost" href="{{ url_for('register') }}">Create a host account</a>{% else %}<h2>No spots match those filters</h2><p>Try another vehicle, area, time, or radius.</p><a class="button ghost" href="{{ url_for('spots') }}">Clear filters</a>{% endif %}</section>
+{% endif %}
+{% if provider_facilities %}
+<section class="provider-results">
+  <div class="section-heading"><div><span class="eyebrow">LIVE PROVIDER DATA · TOMTOM</span><h2>Nearby parking facilities</h2></div></div>
+  <p>These are third-party facilities, not ParkShare host listings. Availability is shown only when TomTom reports it; ParkShare cannot reserve a space there.</p>
+  <section class="spot-grid">
+    {% for facility in provider_facilities %}
+    <article class="spot-card provider-card">
+      <div class="spot-body">
+        <div class="spot-title"><h2>{{ facility.name }}</h2><span class="badge {% if facility.availability is sameas true %}available{% elif facility.availability is sameas false %}cancelled{% endif %}">{% if facility.availability is sameas true %}Available{% elif facility.availability is sameas false %}Full{% else %}Live status unavailable{% endif %}</span></div>
+        {% if facility.address %}<p>{{ facility.address }}</p>{% endif %}
+        {% if facility.distance_km is not none %}<p class="recommendation-meta">{{ facility.distance_km }} km away</p>{% endif %}
+        {% if facility.empty_spots is not none %}<p>{{ facility.empty_spots }} spaces reported free</p>{% endif %}
+        {% if facility.updated_at %}<small>Provider update: {{ facility.updated_at }}</small>{% endif %}
+        <a class="text-link" href="{{ map_url(facility.name ~ ' ' ~ facility.address) }}" target="_blank" rel="noopener noreferrer">Check directions and facility details →</a>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+</section>
+{% elif filters.near_lat and not demo_mode %}
+<section class="provider-results">
+  <span class="eyebrow">LIVE PARKING DATA</span>
+  <p>{% if tomtom_enabled %}No nearby TomTom parking facilities were returned. Host listings appear separately above.{% else %}Live provider data is not configured. Only ParkShare host listings are shown.{% endif %}</p>
+</section>
 {% endif %}
 {% if demo_markers %}
 <section class="demo-coverage" aria-label="Demo-only coverage preview">
   <span class="eyebrow">DEMO ONLY · NOT REAL PARKING</span>
   <h2>Search-area coverage preview</h2>
-  <p>These generated amber pins help test nearby search. They are not verified parking locations, do not have real prices or availability, and cannot be booked. Only host listings above are real ParkShare listings.</p>
+  <p>These generated amber pins help test nearby search. They are not real parking spaces, prices, or availability and cannot be booked. Sample listing cards are separate, explicitly marked illustrations.</p>
   <div class="coverage-rings">
     {% for distance in [5, 10, 15, 20] if distance <= filters.radius_km %}
     <span>{{ distance }} km ring · 8 sample map pins</span>
