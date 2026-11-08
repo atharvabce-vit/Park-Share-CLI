@@ -7,16 +7,16 @@
   <span class="result-count">{{ spots|length }} available</span>
 </section>
 <form class="filter-panel" method="get" action="{{ url_for('spots') }}">
-  <label class="field">Location<input id="parking-location-query" name="location" value="{{ filters.location }}" placeholder="Neighborhood or area"></label>
+  <label class="field">Search a location in India<input id="parking-location-query" name="location" value="{{ filters.location }}" placeholder="e.g. Connaught Place, New Delhi" autocomplete="off"></label>
   <label class="field">Max price / hour<input type="number" min="0" step="0.5" name="max_price" value="{{ filters.max_price }}" placeholder="Any price"></label>
   <label class="field">Vehicle type<select name="vehicle_type"><option value="Any" {% if filters.vehicle_type == "Any" %}selected{% endif %}>Any vehicle</option>{% for kind in vehicle_types %}<option value="{{ kind }}" {% if filters.vehicle_type == kind %}selected{% endif %}>{{ kind }}{% if signed_in_user and signed_in_user.vehicle_type == kind %} · your vehicle{% endif %}</option>{% endfor %}</select></label>
   <label class="field">Sort by<select name="sort"><option value="recommended" {% if filters.sort == "recommended" %}selected{% endif %}>Recommended</option><option value="price" {% if filters.sort == "price" %}selected{% endif %}>Price: low to high</option><option value="rating" {% if filters.sort == "rating" %}selected{% endif %}>Top rated</option><option value="availability" {% if filters.sort == "availability" %}selected{% endif %}>Most spaces</option></select></label>
   <label class="field">Start time<input type="datetime-local" name="start_time" min="{{ filters.minimum_start }}" value="{{ filters.start_time }}"></label>
   <label class="field">Duration (hours)<input type="number" name="hours" min="1" max="168" value="{{ filters.hours }}"></label>
   <div class="nearby-panel">
-    <div><span class="eyebrow">PICK YOUR AREA</span><h2>Search near a map pin</h2><p>Type a place above and submit to locate it automatically, click the map, or use your current location. Nearby search is 20 km by default.</p></div>
+    <div><span class="eyebrow">PICK YOUR AREA</span><h2>Search near a map pin</h2><p>Enter a city, neighborhood, or landmark in India and press Enter or choose Show on map. Then select Search this area to find parking within your chosen radius.</p></div>
     <div class="map-tools">
-      <button class="button secondary" type="button" data-map-geocode="parking-location-query" data-map-target="nearby-map">Find place on map</button>
+      <button class="button secondary" type="button" data-map-geocode="parking-location-query" data-map-target="nearby-map">Show on map</button>
       <button class="button secondary" type="button" data-map-geolocate data-map-target="nearby-map">Use my location</button>
       <label class="field">Search radius<select id="nearby-radius" name="radius_km">{% for radius in [5, 10, 15, 20] %}<option value="{{ radius }}" {% if filters.radius_km == radius %}selected{% endif %}>{{ radius }} km</option>{% endfor %}</select></label>
       <input id="nearby-latitude" name="near_lat" type="hidden" value="{{ filters.near_lat }}"><input id="nearby-longitude" name="near_lon" type="hidden" value="{{ filters.near_lon }}">
