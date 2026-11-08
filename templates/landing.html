@@ -5,10 +5,14 @@
   <div class="hero-copy">
     <span class="eyebrow">YOUR SPACE. YOUR SCHEDULE.</span>
     <h1>Parking that fits<br><span>your day.</span></h1>
-    <p>Find a spot nearby or turn your empty parking space into extra income. Simple, local, and made for real life.</p>
+    {% if demo_mode %}
+    <p>Explore clearly marked sample listings without an account. Register for a persistent booking history or to host a real space.</p>
+    {% else %}
+    <p>Browse parking listed by local hosts without an account. Register for a persistent booking history or to share your own space.</p>
+    {% endif %}
     <div class="hero-actions">
-      <a class="button primary" href="{{ url_for('register') }}">Get started <span aria-hidden="true">→</span></a>
-      <a class="button ghost" href="{{ url_for('login') }}">I already have an account</a>
+      <a class="button primary" href="{{ url_for('spots') }}">Browse parking <span aria-hidden="true">→</span></a>
+      <a class="button ghost" href="{{ url_for('register') }}">Create an account</a>
     </div>
   </div>
   <div class="hero-card">
@@ -28,7 +32,7 @@
   <div><strong>2</strong><span>ways to get started</span></div>
 </section>
 <section class="feature-grid">
-  <article class="feature-card"><span class="feature-icon">⌕</span><h2>For drivers</h2><p>Filter by neighborhood, price, vehicle type, covered parking, or EV charging.</p></article>
+  <article class="feature-card"><span class="feature-icon">⌕</span><h2>For drivers</h2><p>Browse host listings and try a guest booking, or register to keep an account-based booking history.</p></article>
   <article class="feature-card"><span class="feature-icon">⌂</span><h2>For hosts</h2><p>List your space, choose what vehicles fit, and track bookings and earnings.</p></article>
   <article class="feature-card"><span class="feature-icon">✓</span><h2>Clear from start to finish</h2><p>See your assigned slot, manage active bookings, and review checkout totals.</p></article>
 </section>
