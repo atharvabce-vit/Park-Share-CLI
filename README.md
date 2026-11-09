@@ -77,7 +77,15 @@ To use a stable signing key across restarts, set the `PARKSHARE_SECRET_KEY` envi
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Password-reset email requires a reachable SMTP provider. Set `PARKSHARE_SMTP_HOST` and `PARKSHARE_SMTP_FROM`, plus `PARKSHARE_SMTP_USER` and `PARKSHARE_SMTP_PASSWORD` when the provider requires authentication. `PARKSHARE_SMTP_PORT` defaults to `587` with STARTTLS. Do not commit credentials. Reset links expire after 30 minutes and can only be used once. Without SMTP configuration, reset requests show a generic confirmation, but no email is delivered.
+Password-reset email and booking email notifications require a reachable SMTP provider. Set `PARKSHARE_SMTP_HOST` and `PARKSHARE_SMTP_FROM`, plus `PARKSHARE_SMTP_USER` and `PARKSHARE_SMTP_PASSWORD` when the provider requires authentication. `PARKSHARE_SMTP_PORT` defaults to `587` with STARTTLS. Do not commit credentials. Reset links expire after 30 minutes and can only be used once. Without SMTP configuration, reset requests show a generic confirmation, but no email is delivered; booking updates continue to appear in the in-app notifications.
+
+ParkShare emails registered booking parties when a reservation is confirmed or cancelled, at check-in, and when checkout/payment completes. To send a one-time email reminder to registered drivers whose active booking starts within 24 hours, run this command from the project directory:
+
+```powershell
+python -m flask --app web_app send-booking-reminders
+```
+
+Schedule the command to run every 15 minutes using Windows Task Scheduler (or an equivalent scheduler). Configure the same SMTP and database environment variables for the scheduled task as for the app. A successful reminder is recorded in SQLite so later runs do not resend it; failed sends remain eligible for retry. Guest bookings do not have an email address and therefore do not receive email reminders.
 
 ### Trust, reviews, and reports
 

@@ -315,6 +315,128 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIn(b"30-day occupancy", earnings.data)
         self.assertIn(b"Monthly earnings", earnings.data)
 
+    def test_booking_emails_and_reminders_are_sent_once(self):
+        self.app.config.update(
+            SMTP_HOST="smtp.example.com",
+            SMTP_FROM="parkshare@example.com",
+            SMTP_PORT=587,
+            SMTP_USER="",
+            SMTP_PASSWORD="",
+        )
+        host = self.app.test_client()
+        self.register(host, "mail_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page),
+            "location": "Email reminder garage",
+            "price_per_hour": "40",
+            "total_slots": "1",
+            "latitude": "19.0760",
+            "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        driver = self.app.test_client()
+        self.register(driver, "mail_driver")
+        booking_start = datetime.now() + timedelta(hours=12)
+        browse = driver.get("/spots")
+        with patch("web_app.smtplib.SMTP") as smtp:
+            response = driver.post("/bookings/create", data={
+                "csrf_token": self.csrf(browse),
+                "spot_id": str(data_store.spots_db[0].spot_id),
+                "hours": "1",
+                "start_time": booking_start.strftime("%Y-%m-%dT%H:%M"),
+            }, follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+            send_message = smtp.return_value.__enter__.return_value.send_message
+            self.assertEqual(send_message.call_count, 2)
+            recipients = {
+                call.args[0]["To"] for call in send_message.call_args_list
+            }
+            self.assertEqual(recipients, {
+                "mail_host@example.com", "mail_driver@example.com",
+            })
+
+            runner = self.app.test_cli_runner()
+            sent = runner.invoke(args=["send-booking-reminders"])
+            self.assertEqual(sent.exit_code, 0, sent.output)
+            self.assertIn("Sent 1 booking reminder", sent.output)
+            booking = data_store.bookings_db[0]
+            self.assertIsNotNone(booking.reminder_sent_at)
+            self.assertEqual(send_message.call_count, 3)
+            repeated = runner.invoke(args=["send-booking-reminders"])
+            self.assertEqual(repeated.exit_code, 0, repeated.output)
+            self.assertIn("Sent 0 booking reminder", repeated.output)
+            self.assertEqual(send_message.call_count, 3)
+
+            booking.start_time = datetime.now() - timedelta(minutes=1)
+            booking.end_time = datetime.now() + timedelta(hours=1)
+            booking_page = driver.get("/bookings")
+            checked_in = driver.post(
+                "/bookings/" + str(booking.booking_id) + "/check-in",
+                data={"csrf_token": self.csrf(booking_page)},
+            )
+            self.assertEqual(checked_in.status_code, 302)
+            booking_page = driver.get("/bookings")
+            checked_out = driver.post(
+                "/bookings/" + str(booking.booking_id) + "/checkout",
+                data={"csrf_token": self.csrf(booking_page)},
+            )
+            self.assertEqual(checked_out.status_code, 302)
+            self.assertEqual(booking.status, "Completed")
+            subjects = [
+                call.args[0]["Subject"] for call in send_message.call_args_list
+            ]
+            self.assertEqual(subjects.count("ParkShare check-in recorded"), 2)
+            self.assertEqual(subjects.count("ParkShare checkout completed"), 2)
+
+        data_store.configure_storage(self.database_path)
+        self.assertIsNotNone(data_store.bookings_db[0].reminder_sent_at)
+
+    def test_failed_booking_reminder_is_not_marked_sent(self):
+        self.app.config.update(
+            SMTP_HOST="smtp.example.com",
+            SMTP_FROM="parkshare@example.com",
+        )
+        host = self.app.test_client()
+        self.register(host, "retry_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page),
+            "location": "Reminder retry garage",
+            "price_per_hour": "40",
+            "total_slots": "1",
+            "latitude": "19.0760",
+            "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        driver = self.app.test_client()
+        self.register(driver, "retry_driver")
+        browse = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(browse),
+            "spot_id": str(data_store.spots_db[0].spot_id),
+            "hours": "1",
+            "start_time": (datetime.now() + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M"),
+        })
+
+        with patch("web_app.smtplib.SMTP") as smtp:
+            smtp.return_value.__enter__.return_value.send_message.side_effect = OSError(
+                "SMTP unavailable"
+            )
+            result = self.app.test_cli_runner().invoke(
+                args=["send-booking-reminders"]
+            )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Sent 0 booking reminder", result.output)
+        self.assertIsNone(data_store.bookings_db[0].reminder_sent_at)
+
+    def test_reminder_command_requires_smtp_configuration(self):
+        result = self.app.test_cli_runner().invoke(
+            args=["send-booking-reminders"]
+        )
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("Configure PARKSHARE_SMTP_HOST", result.output)
+
     def test_driver_can_check_in_and_complete_a_booking(self):
         host = self.app.test_client()
         self.register(host, "checkin_host", "Host")

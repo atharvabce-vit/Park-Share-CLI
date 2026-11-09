@@ -14,6 +14,7 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
 
+import click
 from flask import Flask, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 
 import auth_module
@@ -27,6 +28,7 @@ from werkzeug.security import generate_password_hash
 
 VEHICLE_TYPES = ("Car", "Motorcycle", "SUV", "Van")
 booking_lock = threading.RLock()
+reminder_dispatch_lock = threading.Lock()
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 
 
@@ -171,6 +173,101 @@ def _send_password_reset(recipient, reset_url):
         smtp.send_message(message)
 
 
+def _send_email(recipient, subject, body):
+    if not recipient:
+        return False
+    config = current_app.config
+    if not config["SMTP_HOST"] or not config["SMTP_FROM"]:
+        current_app.logger.info("Email not sent because SMTP is not configured.")
+        return False
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = config["SMTP_FROM"]
+    message["To"] = recipient
+    message.set_content(body)
+    try:
+        with smtplib.SMTP(config["SMTP_HOST"], config["SMTP_PORT"], timeout=10) as smtp:
+            smtp.starttls()
+            if config["SMTP_USER"]:
+                smtp.login(config["SMTP_USER"], config["SMTP_PASSWORD"])
+            smtp.send_message(message)
+    except (OSError, smtplib.SMTPException, ValueError):
+        current_app.logger.exception("Unable to send ParkShare email to %s", recipient)
+        return False
+    return True
+
+
+def _notify_booking_parties(booking, spot, subject, update):
+    recipients = []
+    host = data_store.users_db.get(spot.host_username)
+    if host and host.email:
+        recipients.append(host.email)
+    driver = (
+        data_store.users_db.get(booking.driver_username)
+        if booking.driver_username != "Guest" else None
+    )
+    if driver and driver.email:
+        recipients.append(driver.email)
+    if not recipients:
+        return
+    details = (
+        "Booking #" + str(booking.booking_id) + "\n"
+        + "Parking: " + spot.location + "\n"
+        + "Reserved from: " + booking.start_time.strftime("%d %b %Y, %I:%M %p") + "\n"
+        + "Reserved until: " + booking.end_time.strftime("%d %b %Y, %I:%M %p") + "\n"
+        + "Booking status: " + booking.status + "\n"
+        + "Payment status: " + booking.payment_status + "\n\n"
+        + update
+    )
+    for recipient in dict.fromkeys(recipients):
+        _send_email(recipient, subject, details)
+
+
+def send_due_booking_reminders(now=None):
+    now = now or datetime.now()
+    reminder_cutoff = now + timedelta(hours=24)
+    sent = 0
+    if not reminder_dispatch_lock.acquire(blocking=False):
+        return 0
+    try:
+        with booking_lock:
+            due_bookings = [
+                booking for booking in data_store.bookings_db
+                if booking.status == "Active" and booking.reminder_sent_at is None
+                and now < booking.start_time <= reminder_cutoff
+            ]
+        for booking in due_bookings:
+            with booking_lock:
+                if booking.status != "Active" or booking.reminder_sent_at is not None:
+                    continue
+                driver = (
+                    data_store.users_db.get(booking.driver_username)
+                    if booking.driver_username != "Guest" else None
+                )
+                spot = data_store.find_spot(booking.spot_id)
+                if driver is None or not driver.email or spot is None:
+                    continue
+                body = (
+                    "Your ParkShare reservation starts within the next 24 hours.\n\n"
+                    + "Booking #" + str(booking.booking_id) + "\n"
+                    + "Parking: " + spot.location + "\n"
+                    + "Start: " + booking.start_time.strftime("%d %b %Y, %I:%M %p") + "\n"
+                    + "End: " + booking.end_time.strftime("%d %b %Y, %I:%M %p") + "\n"
+                    + "Booking status: " + booking.status + "\n"
+                    + "Payment status: " + booking.payment_status
+                )
+                recipient = driver.email
+            if _send_email(recipient, "Upcoming ParkShare booking", body):
+                with booking_lock:
+                    if booking.status == "Active" and booking.reminder_sent_at is None:
+                        booking.reminder_sent_at = now
+                        data_store.persist()
+                        sent += 1
+    finally:
+        reminder_dispatch_lock.release()
+    return sent
+
+
 def create_app(test_config=None):
     app = Flask(__name__)
     app.config.update(
@@ -186,6 +283,11 @@ def create_app(test_config=None):
             "PARKSHARE_PUBLIC_URL",
             "http://127.0.0.1:" + os.environ.get("PARKSHARE_PORT", "5000"),
         ),
+        SMTP_HOST=os.environ.get("PARKSHARE_SMTP_HOST", "").strip(),
+        SMTP_FROM=os.environ.get("PARKSHARE_SMTP_FROM", "").strip(),
+        SMTP_PORT=int(os.environ.get("PARKSHARE_SMTP_PORT", "587")),
+        SMTP_USER=os.environ.get("PARKSHARE_SMTP_USER", ""),
+        SMTP_PASSWORD=os.environ.get("PARKSHARE_SMTP_PASSWORD", ""),
         RAZORPAY_KEY_ID=os.environ.get("PARKSHARE_RAZORPAY_KEY_ID", "").strip(),
         RAZORPAY_KEY_SECRET=os.environ.get("PARKSHARE_RAZORPAY_KEY_SECRET", "").strip(),
         RAZORPAY_WEBHOOK_SECRET=os.environ.get("PARKSHARE_RAZORPAY_WEBHOOK_SECRET", "").strip(),
@@ -208,6 +310,15 @@ def create_app(test_config=None):
             raise ValueError("Razorpay key ID does not match the configured payment mode.")
     app.config["PAYMENT_ENABLED"] = app.config["PAYMENT_MODE"] != "disabled"
     data_store.configure_builtin_listings(app.config["DEMO_MODE"])
+
+    @app.cli.command("send-booking-reminders")
+    def send_booking_reminders_command():
+        if not app.config["SMTP_HOST"] or not app.config["SMTP_FROM"]:
+            raise click.ClickException(
+                "Configure PARKSHARE_SMTP_HOST and PARKSHARE_SMTP_FROM before sending reminders."
+            )
+        sent = send_due_booking_reminders()
+        click.echo("Sent " + str(sent) + " booking reminder(s).")
 
     def current_user():
         username = session.get("username")
@@ -272,6 +383,16 @@ def create_app(test_config=None):
             actor + " completed booking #" + str(booking.booking_id) + ".",
         )
         data_store.persist()
+
+    def notify_checkout_completion(booking, spot):
+        payment_update = (
+            "Payment was captured successfully."
+            if booking.payment_status == "captured"
+            else "Checkout is complete; ParkShare did not process an online payment."
+        )
+        _notify_booking_parties(
+            booking, spot, "ParkShare checkout completed", payment_update
+        )
 
     @app.before_request
     def protect_forms():
@@ -985,6 +1106,10 @@ def create_app(test_config=None):
             )
             data_store.log_event((user.username if user else "A guest") + " booked spot #" + str(spot.spot_id)
                                  + " (slot " + str(slot_number) + ")")
+        _notify_booking_parties(
+            booking, spot, "ParkShare booking confirmed",
+            "Your parking reservation is confirmed.",
+        )
         flash("Booking confirmed — your assigned space is #" + str(slot_number) + ".", "success")
         return redirect(url_for("bookings"))
 
@@ -1010,6 +1135,10 @@ def create_app(test_config=None):
                 actor + " cancelled booking #" + str(booking_id) + ".",
             )
             data_store.log_event(actor + " cancelled booking #" + str(booking_id))
+        _notify_booking_parties(
+            booking, spot, "ParkShare booking cancelled",
+            "This reservation was cancelled. No charge was made.",
+        )
         flash("Booking cancelled without charge.", "success")
         return redirect(url_for("bookings"))
 
@@ -1034,6 +1163,10 @@ def create_app(test_config=None):
             )
             data_store.refresh_availability(spot)
             data_store.persist()
+        _notify_booking_parties(
+            booking, spot, "ParkShare check-in recorded",
+            "Check-in has been recorded for this reservation.",
+        )
         flash("You are checked in. Enjoy your stay.", "success")
         return redirect(url_for("bookings"))
 
@@ -1112,6 +1245,7 @@ def create_app(test_config=None):
             final_amount, discount, unused_rate = billing_module.apply_discount(amount, promo)
             rating_raw = request.form.get("rating", "")
             complete_checkout(booking, actor, spot, exit_time, hours, final_amount, rating_raw)
+        notify_checkout_completion(booking, spot)
         if promo and not discount:
             flash("Checkout complete. That promo code was not recognized.", "error")
         else:
@@ -1163,6 +1297,7 @@ def create_app(test_config=None):
                 booking, actor, spot, booking.exit_time, booking.billed_hours,
                 booking.final_cost, request.form.get("rating", ""), payment_id,
             )
+        notify_checkout_completion(booking, spot)
         flash("Payment received and checkout complete.", "success")
         return redirect(url_for("bookings"))
 
@@ -1365,6 +1500,7 @@ def create_app(test_config=None):
                 booking, actor, spot, booking.exit_time, booking.billed_hours,
                 booking.final_cost, payment_id=payment.get("id", ""),
             )
+        notify_checkout_completion(booking, spot)
         return "", 200
 
     @app.route("/host/earnings")

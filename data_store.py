@@ -91,7 +91,7 @@ def _connect():
             guest_id TEXT NOT NULL DEFAULT '', checkin_time TEXT,
             payment_status TEXT NOT NULL DEFAULT 'unpaid',
             payment_order_id TEXT NOT NULL DEFAULT '', payment_id TEXT NOT NULL DEFAULT '',
-            payment_amount INTEGER
+            payment_amount INTEGER, reminder_sent_at TEXT
         );
         CREATE TABLE IF NOT EXISTS activity_events (
             event_id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, text TEXT NOT NULL
@@ -147,6 +147,8 @@ def _connect():
         connection.execute("ALTER TABLE bookings ADD COLUMN payment_id TEXT NOT NULL DEFAULT ''")
     if "payment_amount" not in booking_columns:
         connection.execute("ALTER TABLE bookings ADD COLUMN payment_amount INTEGER")
+    if "reminder_sent_at" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN reminder_sent_at TEXT")
     user_columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
     if "is_suspended" not in user_columns:
         connection.execute("ALTER TABLE users ADD COLUMN is_suspended INTEGER NOT NULL DEFAULT 0")
@@ -212,7 +214,8 @@ def _load():
             for row in connection.execute(
                 "SELECT booking_id, spot_id, driver_username, planned_hours, price_per_hour, "
                 "entry_time, slot_number, exit_time, billed_hours, final_cost, status, start_time, end_time, "
-                "guest_name, guest_id, checkin_time, payment_status, payment_order_id, payment_id, payment_amount "
+                "guest_name, guest_id, checkin_time, payment_status, payment_order_id, payment_id, "
+                "payment_amount, reminder_sent_at "
                 "FROM bookings ORDER BY booking_id"
             ):
                 booking = Booking(
@@ -228,6 +231,7 @@ def _load():
                 booking.payment_order_id = row[17]
                 booking.payment_id = row[18]
                 booking.payment_amount = row[19]
+                booking.reminder_sent_at = _parse_time(row[20])
                 bookings_db.append(booking)
             for spot in spots_db:
                 spot.available_slots = available_slots_for_window(
@@ -325,7 +329,7 @@ def persist():
                 )
                 connection.execute("DELETE FROM bookings")
                 connection.executemany(
-                    "INSERT INTO bookings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO bookings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(booking.booking_id, booking.spot_id, booking.driver_username,
                       booking.planned_hours, booking.price_per_hour,
                       booking.entry_time.isoformat(), booking.slot_number,
@@ -336,7 +340,9 @@ def persist():
                       booking.guest_name, booking.guest_id,
                       booking.checkin_time.isoformat() if booking.checkin_time else None,
                       booking.payment_status, booking.payment_order_id, booking.payment_id,
-                      booking.payment_amount)
+                      booking.payment_amount,
+                      booking.reminder_sent_at.isoformat()
+                      if booking.reminder_sent_at else None)
                      for booking in bookings_db],
                 )
                 connection.execute("DELETE FROM activity_events")
@@ -386,6 +392,8 @@ def reset_data():
     password_reset_tokens.clear()
     reviews.clear()
     reports.clear()
+
+
     suspended_users.clear()
     login_attempts.clear()
     current_user = None

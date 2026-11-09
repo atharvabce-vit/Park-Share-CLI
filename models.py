@@ -83,3 +83,4 @@ class Booking:
         self.payment_order_id = ""
         self.payment_id = ""
         self.payment_amount = None
+        self.reminder_sent_at = None
