@@ -31,7 +31,7 @@ TomTom Parking Availability supports India and reports off-street availability r
 
 - Booking search availability is calculated for the selected start time and duration. A slot cannot be double-booked during overlapping reservation windows. A reservation is capped at 168 hours and can start up to 30 days in advance.
 - Guest bookings require a name and vehicle type and can be viewed, cancelled, or checked out only in the browser session that created them. Clearing that session removes access to the guest booking history. Creating an account is recommended for persistent booking history.
-- Checkout, ratings, discounts, and earnings are demo features; ParkShare does not process real payments.
+- Checkout uses demo mode until Razorpay is configured; ratings, discounts, and earnings are app features, but ParkShare does not send earnings to hosts.
 - Listing photos are stored locally in `static/uploads` (JPG, PNG, or WebP, maximum 5 MB). Listing coordinates, accounts, ratings, bookings, activity, and notifications are stored in the SQLite database.
 - Hosts receive in-app notifications for booking, cancellation, and checkout events. Profile changes and account deletion are available from **Profile**; account deletion requires the current password and no active bookings.
 - Password reset uses single-use links that expire after 30 minutes. Email delivery only works after an SMTP provider is configured below.
@@ -78,6 +78,37 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 Password-reset email requires a reachable SMTP provider. Set `PARKSHARE_SMTP_HOST` and `PARKSHARE_SMTP_FROM`, plus `PARKSHARE_SMTP_USER` and `PARKSHARE_SMTP_PASSWORD` when the provider requires authentication. `PARKSHARE_SMTP_PORT` defaults to `587` with STARTTLS. Do not commit credentials. Reset links expire after 30 minutes and can only be used once. Without SMTP configuration, reset requests show a generic confirmation, but no email is delivered.
+
+### Trust, reviews, and reports
+
+Hosts can request manual verification from their profile; administrators approve or reject requests. ParkShare does not collect or store identity documents or ID numbers in this workflow. Verified hosts receive a badge on their listings. Configure the comma-separated usernames of trusted administrator accounts before using moderation:
+
+```powershell
+$env:PARKSHARE_ADMIN_USERNAMES = "your_existing_admin_username"
+python web_app.py
+```
+
+Only the configured accounts can access moderation; Host or Driver role by itself does not grant administrator access. Keep the environment configuration private and grant admin access only to trusted accounts.
+
+After a completed booking, signed-in drivers and hosts can each leave one rating and review for the other party when both have accounts. Reviews can be hidden or restored by an administrator. Signed-in users can report a real listing or host; administrators can resolve reports or take action by suspending a reported user or hiding a reported listing that has no active reservations. These user-submitted reviews and reports are moderation signals, not proof of identity, safety, or listing accuracy.
+
+### Razorpay checkout
+
+Razorpay payments are disabled by default; checkout remains in local demo mode until configured. When enabled, checkout calculates the final bill (including overtime and any valid promo code), creates a server-side INR order, and marks the booking complete only after the server verifies the payment signature and confirms the captured amount with Razorpay. Configure automatic payment capture in the Razorpay dashboard.
+
+Start with Razorpay test credentials in the same PowerShell window:
+
+```powershell
+$env:PARKSHARE_PAYMENT_MODE = "test"
+$env:PARKSHARE_RAZORPAY_KEY_ID = "rzp_test_your_key_id"
+$env:PARKSHARE_RAZORPAY_KEY_SECRET = "your_test_key_secret"
+$env:PARKSHARE_RAZORPAY_WEBHOOK_SECRET = "your_webhook_secret"
+python web_app.py
+```
+
+In the Razorpay dashboard, configure a webhook to `https://your-domain/payments/razorpay/webhook` and subscribe to `payment.captured`. The webhook secret must match `PARKSHARE_RAZORPAY_WEBHOOK_SECRET`. For live payments, switch `PARKSHARE_PAYMENT_MODE` to `live` and use live credentials only after testing; the app rejects test/live key-mode mismatches. Keep all secrets out of source control. Use HTTPS and a production WSGI server for live transactions.
+
+Bookings can be checked in during their reserved time window, then checked out. Unpaid bookings can be cancelled before their start time; once payment checkout has begun, the booking is held until that checkout can be retried or completed. Payments are collected at checkout, not when the reservation is created. Completed bookings have a printable receipt, which is not a tax invoice. The app does not yet initiate refunds or host payouts; configure these business processes with the payment provider before handling live bookings.
 
 The built-in Flask development server is intended for local demos, not production deployment.
 

@@ -14,6 +14,10 @@ bookings_db = []
 activity_log = []
 notifications = []
 password_reset_tokens = {}
+reviews = []
+reports = []
+suspended_users = set()
+login_attempts = {}
 current_user = None
 
 _spot_counter = 0
@@ -62,7 +66,10 @@ def _connect():
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY, password TEXT NOT NULL, role TEXT NOT NULL,
             full_name TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL,
-            vehicle_type TEXT NOT NULL, vehicle_plate TEXT NOT NULL
+            vehicle_type TEXT NOT NULL, vehicle_plate TEXT NOT NULL,
+            is_suspended INTEGER NOT NULL DEFAULT 0, suspended_reason TEXT NOT NULL DEFAULT '',
+            verification_status TEXT NOT NULL DEFAULT 'unverified',
+            verification_note TEXT NOT NULL DEFAULT '', verified_at TEXT
         );
         CREATE TABLE IF NOT EXISTS spots (
             spot_id INTEGER PRIMARY KEY, location TEXT NOT NULL, price REAL NOT NULL,
@@ -81,7 +88,10 @@ def _connect():
             price_per_hour REAL NOT NULL, entry_time TEXT NOT NULL, slot_number INTEGER,
             exit_time TEXT, billed_hours INTEGER, final_cost REAL, status TEXT NOT NULL,
             start_time TEXT, end_time TEXT, guest_name TEXT NOT NULL DEFAULT '',
-            guest_id TEXT NOT NULL DEFAULT ''
+            guest_id TEXT NOT NULL DEFAULT '', checkin_time TEXT,
+            payment_status TEXT NOT NULL DEFAULT 'unpaid',
+            payment_order_id TEXT NOT NULL DEFAULT '', payment_id TEXT NOT NULL DEFAULT '',
+            payment_amount INTEGER
         );
         CREATE TABLE IF NOT EXISTS activity_events (
             event_id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, text TEXT NOT NULL
@@ -92,6 +102,20 @@ def _connect():
         );
         CREATE TABLE IF NOT EXISTS password_reset_tokens (
             token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS reviews (
+            review_id INTEGER PRIMARY KEY, booking_id INTEGER NOT NULL,
+            reviewer_username TEXT NOT NULL, target_username TEXT NOT NULL,
+            rating INTEGER NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL,
+            is_visible INTEGER NOT NULL DEFAULT 1,
+            UNIQUE (booking_id, reviewer_username)
+        );
+        CREATE TABLE IF NOT EXISTS reports (
+            report_id INTEGER PRIMARY KEY, reporter_username TEXT NOT NULL,
+            target_type TEXT NOT NULL, target_id TEXT NOT NULL,
+            reason TEXT NOT NULL, details TEXT NOT NULL, status TEXT NOT NULL,
+            resolution TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         );
         """
     )
@@ -113,6 +137,27 @@ def _connect():
         connection.execute("ALTER TABLE bookings ADD COLUMN guest_name TEXT NOT NULL DEFAULT ''")
     if "guest_id" not in booking_columns:
         connection.execute("ALTER TABLE bookings ADD COLUMN guest_id TEXT NOT NULL DEFAULT ''")
+    if "checkin_time" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN checkin_time TEXT")
+    if "payment_status" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid'")
+    if "payment_order_id" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN payment_order_id TEXT NOT NULL DEFAULT ''")
+    if "payment_id" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN payment_id TEXT NOT NULL DEFAULT ''")
+    if "payment_amount" not in booking_columns:
+        connection.execute("ALTER TABLE bookings ADD COLUMN payment_amount INTEGER")
+    user_columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+    if "is_suspended" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN is_suspended INTEGER NOT NULL DEFAULT 0")
+    if "suspended_reason" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN suspended_reason TEXT NOT NULL DEFAULT ''")
+    if "verification_status" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'unverified'")
+    if "verification_note" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN verification_note TEXT NOT NULL DEFAULT ''")
+    if "verified_at" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN verified_at TEXT")
     return connection
 
 
@@ -127,11 +172,19 @@ def _load():
         try:
             current_user = None
             users_db.clear()
+            suspended_users.clear()
             for row in connection.execute(
-                "SELECT username, password, role, full_name, email, phone, vehicle_type, vehicle_plate FROM users"
+                "SELECT username, password, role, full_name, email, phone, vehicle_type, vehicle_plate, is_suspended, suspended_reason, verification_status, verification_note, verified_at FROM users"
             ):
-                user = User(*row)
+                user = User(*row[:8])
+                user.is_suspended = bool(row[8])
+                user.suspended_reason = row[9]
+                user.verification_status = row[10]
+                user.verification_note = row[11]
+                user.verified_at = _parse_time(row[12])
                 users_db[user.username] = user
+                if user.is_suspended:
+                    suspended_users.add(user.username)
 
             spots_db[:] = []
             ratings = {}
@@ -159,17 +212,22 @@ def _load():
             for row in connection.execute(
                 "SELECT booking_id, spot_id, driver_username, planned_hours, price_per_hour, "
                 "entry_time, slot_number, exit_time, billed_hours, final_cost, status, start_time, end_time, "
-                "guest_name, guest_id "
+                "guest_name, guest_id, checkin_time, payment_status, payment_order_id, payment_id, payment_amount "
                 "FROM bookings ORDER BY booking_id"
             ):
                 booking = Booking(
                     row[0], row[1], row[2], row[3], row[4], _parse_time(row[5]), row[6],
                     _parse_time(row[11]), _parse_time(row[12]), row[13], row[14],
+                    _parse_time(row[15]),
                 )
                 booking.exit_time = _parse_time(row[7])
                 booking.billed_hours = row[8]
                 booking.final_cost = row[9]
                 booking.status = row[10]
+                booking.payment_status = row[16]
+                booking.payment_order_id = row[17]
+                booking.payment_id = row[18]
+                booking.payment_amount = row[19]
                 bookings_db.append(booking)
             for spot in spots_db:
                 spot.available_slots = available_slots_for_window(
@@ -195,6 +253,30 @@ def _load():
                 "SELECT token_hash, username, expires_at FROM password_reset_tokens"
             ):
                 password_reset_tokens[token_hash] = (username, _parse_time(expires_at))
+            reviews[:] = [
+                {
+                    "id": row[0], "booking_id": row[1], "reviewer": row[2],
+                    "target": row[3], "rating": row[4], "text": row[5],
+                    "created_at": _parse_time(row[6]), "visible": bool(row[7]),
+                }
+                for row in connection.execute(
+                    "SELECT review_id, booking_id, reviewer_username, target_username, "
+                    "rating, text, created_at, is_visible FROM reviews ORDER BY review_id"
+                )
+            ]
+            reports[:] = [
+                {
+                    "id": row[0], "reporter": row[1], "target_type": row[2],
+                    "target_id": row[3], "reason": row[4], "details": row[5],
+                    "status": row[6], "resolution": row[7],
+                    "created_at": _parse_time(row[8]), "updated_at": _parse_time(row[9]),
+                }
+                for row in connection.execute(
+                    "SELECT report_id, reporter_username, target_type, target_id, reason, "
+                    "details, status, resolution, created_at, updated_at "
+                    "FROM reports ORDER BY report_id DESC"
+                )
+            ]
             _spot_counter = max((spot.spot_id for spot in spots_db), default=0)
             _booking_counter = max((booking.booking_id for booking in bookings_db), default=0)
         finally:
@@ -216,9 +298,14 @@ def persist():
             with connection:
                 connection.execute("DELETE FROM users")
                 connection.executemany(
-                    "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(user.username, user.password, user.role, user.full_name, user.email,
-                      user.phone, user.vehicle_type, user.vehicle_plate)
+                      user.phone, user.vehicle_type, user.vehicle_plate,
+                      int(getattr(user, "is_suspended", False)),
+                      getattr(user, "suspended_reason", ""),
+                      getattr(user, "verification_status", "unverified"),
+                      getattr(user, "verification_note", ""),
+                      user.verified_at.isoformat() if getattr(user, "verified_at", None) else None)
                      for user in users_db.values()],
                 )
                 connection.execute("DELETE FROM spots")
@@ -238,7 +325,7 @@ def persist():
                 )
                 connection.execute("DELETE FROM bookings")
                 connection.executemany(
-                    "INSERT INTO bookings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO bookings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(booking.booking_id, booking.spot_id, booking.driver_username,
                       booking.planned_hours, booking.price_per_hour,
                       booking.entry_time.isoformat(), booking.slot_number,
@@ -246,7 +333,10 @@ def persist():
                       booking.billed_hours, booking.final_cost, booking.status,
                       booking.start_time.isoformat() if booking.start_time else None,
                       booking.end_time.isoformat() if booking.end_time else None,
-                      booking.guest_name, booking.guest_id)
+                      booking.guest_name, booking.guest_id,
+                      booking.checkin_time.isoformat() if booking.checkin_time else None,
+                      booking.payment_status, booking.payment_order_id, booking.payment_id,
+                      booking.payment_amount)
                      for booking in bookings_db],
                 )
                 connection.execute("DELETE FROM activity_events")
@@ -267,6 +357,21 @@ def persist():
                     [(token_hash, username, expires_at.isoformat())
                      for token_hash, (username, expires_at) in password_reset_tokens.items()],
                 )
+                connection.execute("DELETE FROM reviews")
+                connection.executemany(
+                    "INSERT INTO reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(item["id"], item["booking_id"], item["reviewer"], item["target"],
+                      item["rating"], item["text"], item["created_at"].isoformat(),
+                      int(item["visible"])) for item in reviews],
+                )
+                connection.execute("DELETE FROM reports")
+                connection.executemany(
+                    "INSERT INTO reports VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(item["id"], item["reporter"], item["target_type"], item["target_id"],
+                      item["reason"], item["details"], item["status"], item["resolution"],
+                      item["created_at"].isoformat(), item["updated_at"].isoformat())
+                     for item in reports],
+                )
         finally:
             connection.close()
 
@@ -279,6 +384,10 @@ def reset_data():
     activity_log[:] = []
     notifications[:] = []
     password_reset_tokens.clear()
+    reviews.clear()
+    reports.clear()
+    suspended_users.clear()
+    login_attempts.clear()
     current_user = None
     _spot_counter = 0
     _booking_counter = 0
@@ -323,7 +432,7 @@ def configure_builtin_listings(enabled):
             changed = True
         if not enabled:
             for booking in bookings_db:
-                if booking.spot_id == spot.spot_id and booking.status == "Active":
+                if booking.spot_id == spot.spot_id and booking.status in ("Active", "Checked In"):
                     booking.status = "Cancelled"
                     changed = True
     if changed:
@@ -351,7 +460,7 @@ def find_booking(booking_id):
 
 
 def active_bookings():
-    return [booking for booking in bookings_db if booking.status == "Active"]
+    return [booking for booking in bookings_db if booking.status in ("Active", "Checked In")]
 
 
 def total_slots():
@@ -376,7 +485,7 @@ def add_notification(username, text):
 
 
 def overlap(booking, start_time, end_time):
-    if booking.status != "Active":
+    if booking.status not in ("Active", "Checked In"):
         return False
     start = booking.start_time or booking.entry_time
     end = booking.end_time or (start + timedelta(hours=booking.planned_hours))
@@ -391,7 +500,7 @@ def occupied_slots(spot_id, start_time=None, end_time=None):
         if booking.spot_id != spot_id or booking.slot_number is None:
             continue
         if start_time is None or end_time is None:
-            if booking.status == "Active":
+            if booking.status in ("Active", "Checked In"):
                 used.add(booking.slot_number)
         elif overlap(booking, start_time, end_time):
             used.add(booking.slot_number)

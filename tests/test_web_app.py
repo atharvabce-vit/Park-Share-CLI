@@ -1,4 +1,6 @@
 import binascii
+import hashlib
+import hmac
 import re
 import os
 import struct
@@ -312,6 +314,435 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(earnings.status_code, 200)
         self.assertIn(b"30-day occupancy", earnings.data)
         self.assertIn(b"Monthly earnings", earnings.data)
+
+    def test_driver_can_check_in_and_complete_a_booking(self):
+        host = self.app.test_client()
+        self.register(host, "checkin_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page), "location": "Check-in garage",
+            "price_per_hour": "40", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        self.register(self.client, "checkin_driver")
+        browse = self.client.get("/spots")
+        start = (datetime.now() + timedelta(minutes=5)).replace(second=0, microsecond=0)
+        self.client.post("/bookings/create", data={
+            "csrf_token": self.csrf(browse), "spot_id": "1", "hours": "2",
+            "start_time": start.strftime("%Y-%m-%dT%H:%M"),
+        })
+        booking = data_store.bookings_db[0]
+        self.assertEqual(booking.status, "Active")
+        booking.start_time = datetime.now() - timedelta(minutes=1)
+        booking.end_time = datetime.now() + timedelta(hours=1)
+        booking.entry_time = booking.start_time
+        data_store.persist()
+
+        page = self.client.get("/bookings")
+        self.assertIn(b"Check in", page.data)
+        checked_in = self.client.post(
+            "/bookings/" + str(booking.booking_id) + "/check-in",
+            data={"csrf_token": self.csrf(page)},
+            follow_redirects=True,
+        )
+        self.assertEqual(booking.status, "Checked In")
+        self.assertIsNotNone(booking.checkin_time)
+        self.assertIn(booking, data_store.active_bookings())
+        self.assertIn(b"checked in", checked_in.data.lower())
+
+        page = self.client.get("/bookings")
+        completed = self.client.post(
+            "/bookings/" + str(booking.booking_id) + "/checkout",
+            data={"csrf_token": self.csrf(page)},
+            follow_redirects=True,
+        )
+        self.assertEqual(booking.status, "Completed")
+        self.assertIn(b"Checkout complete", completed.data)
+
+    def test_razorpay_checkout_verifies_captured_amount_before_completion(self):
+        payment_app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+            "UPLOAD_FOLDER": os.path.join(self.temp_dir.name, "uploads"),
+            "PAYMENT_MODE": "test",
+            "RAZORPAY_KEY_ID": "rzp_test_example",
+            "RAZORPAY_KEY_SECRET": "test-secret",
+        })
+        host = payment_app.test_client()
+        self.register(host, "payment_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page), "location": "Paid checkout garage",
+            "price_per_hour": "75", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        driver = payment_app.test_client()
+        self.register(driver, "payment_driver")
+        browse = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(browse), "spot_id": "1", "hours": "1",
+            "start_time": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+        })
+        booking = data_store.bookings_db[0]
+
+        with patch("payment_module.create_order", return_value={
+                "id": "order_test_123", "amount": 6750, "currency": "INR"}):
+            page = driver.get("/bookings")
+            order_response = driver.post(
+                "/bookings/" + str(booking.booking_id) + "/checkout",
+                data={"csrf_token": self.csrf(page), "promo_code": "PARK10"},
+            )
+        self.assertEqual(order_response.status_code, 200)
+        self.assertEqual(order_response.get_json()["order_id"], "order_test_123")
+        self.assertEqual(booking.payment_status, "created")
+        self.assertEqual(booking.payment_amount, 6750)
+        self.assertEqual(booking.status, "Active")
+        data_store.configure_storage(self.database_path)
+        booking = data_store.find_booking(booking.booking_id)
+        self.assertEqual(booking.payment_order_id, "order_test_123")
+        self.assertEqual(booking.payment_amount, 6750)
+        self.assertEqual(booking.payment_status, "created")
+
+        with patch("payment_module.verify_checkout_signature", return_value=True), patch(
+                "payment_module.fetch_payment", return_value={
+                    "id": "pay_test_123",
+                    "order_id": "order_test_123",
+                    "amount": 6750,
+                    "currency": "INR",
+                    "status": "captured",
+                }):
+            page = driver.get("/bookings")
+            verified = driver.post(
+                "/bookings/" + str(booking.booking_id) + "/payment/verify",
+                data={
+                    "csrf_token": self.csrf(page),
+                    "razorpay_order_id": "order_test_123",
+                    "razorpay_payment_id": "pay_test_123",
+                    "razorpay_signature": "verified-signature",
+                    "rating": "5",
+                },
+                follow_redirects=True,
+            )
+        self.assertEqual(verified.status_code, 200)
+        self.assertEqual(booking.status, "Completed")
+        self.assertEqual(booking.payment_status, "captured")
+        self.assertEqual(booking.payment_id, "pay_test_123")
+        self.assertEqual(booking.final_cost, 67.5)
+        receipt = driver.get("/bookings/" + str(booking.booking_id) + "/receipt")
+        self.assertEqual(receipt.status_code, 200)
+        self.assertIn(b"Paid via Razorpay", receipt.data)
+        self.assertIn(b"67.50", receipt.data)
+
+    def test_razorpay_rejects_bad_signatures_and_uncaptured_payments(self):
+        payment_app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+            "PAYMENT_MODE": "test",
+            "RAZORPAY_KEY_ID": "rzp_test_example",
+            "RAZORPAY_KEY_SECRET": "test-secret",
+        })
+        host = payment_app.test_client()
+        self.register(host, "badpay_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page), "location": "Payment verification garage",
+            "price_per_hour": "30", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        driver = payment_app.test_client()
+        self.register(driver, "badpay_driver")
+        browse = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(browse), "spot_id": "1", "hours": "1",
+            "start_time": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+        })
+        booking = data_store.bookings_db[0]
+        with patch("payment_module.create_order", return_value={
+                "id": "order_bad_sig", "amount": 3000, "currency": "INR"}):
+            page = driver.get("/bookings")
+            driver.post(
+                "/bookings/" + str(booking.booking_id) + "/checkout",
+                data={"csrf_token": self.csrf(page)},
+            )
+        page = driver.get("/bookings")
+        with patch("payment_module.verify_checkout_signature", return_value=False):
+            rejected = driver.post(
+                "/bookings/" + str(booking.booking_id) + "/payment/verify",
+                data={
+                    "csrf_token": self.csrf(page),
+                    "razorpay_order_id": "order_bad_sig",
+                    "razorpay_payment_id": "pay_bad_sig",
+                    "razorpay_signature": "forged",
+                },
+            )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(booking.status, "Active")
+        self.assertEqual(booking.payment_status, "created")
+
+        with patch("payment_module.verify_checkout_signature", return_value=True), patch(
+                "payment_module.fetch_payment", return_value={
+                    "order_id": "order_bad_sig",
+                    "amount": booking.payment_amount,
+                    "currency": "INR",
+                    "status": "authorized",
+                }):
+            rejected = driver.post(
+                "/bookings/" + str(booking.booking_id) + "/payment/verify",
+                data={
+                    "csrf_token": self.csrf(page),
+                    "razorpay_order_id": "order_bad_sig",
+                    "razorpay_payment_id": "pay_not_captured",
+                    "razorpay_signature": "valid",
+                },
+            )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(booking.status, "Active")
+
+    def test_razorpay_webhook_verifies_signature_and_completes_payment_idempotently(self):
+        webhook_secret = "hook-secret"
+        payment_app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+            "PAYMENT_MODE": "test",
+            "RAZORPAY_KEY_ID": "rzp_test_example",
+            "RAZORPAY_KEY_SECRET": "test-secret",
+            "RAZORPAY_WEBHOOK_SECRET": webhook_secret,
+        })
+        host = payment_app.test_client()
+        self.register(host, "webhook_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page), "location": "Webhook garage",
+            "price_per_hour": "25", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        driver = payment_app.test_client()
+        self.register(driver, "webhook_driver")
+        browse = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(browse), "spot_id": "1", "hours": "1",
+            "start_time": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+        })
+        booking = data_store.bookings_db[0]
+        with patch("payment_module.create_order", return_value={
+                "id": "order_webhook_123", "amount": 2500, "currency": "INR"}):
+            page = driver.get("/bookings")
+            driver.post(
+                "/bookings/" + str(booking.booking_id) + "/checkout",
+                data={"csrf_token": self.csrf(page)},
+            )
+
+        payload = (
+            '{"event":"payment.captured","payload":{"payment":{"entity":{'
+            '"id":"pay_webhook_123","order_id":"order_webhook_123",'
+            '"amount":2500,"currency":"INR","status":"captured"}}}}'
+        ).encode("utf-8")
+        signature = hmac.new(
+            webhook_secret.encode("utf-8"), payload, hashlib.sha256
+        ).hexdigest()
+        invalid = driver.post(
+            "/payments/razorpay/webhook",
+            data=payload,
+            headers={"X-Razorpay-Signature": "invalid"},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        accepted = driver.post(
+            "/payments/razorpay/webhook",
+            data=payload,
+            headers={"X-Razorpay-Signature": signature},
+        )
+        duplicate = driver.post(
+            "/payments/razorpay/webhook",
+            data=payload,
+            headers={"X-Razorpay-Signature": signature},
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(booking.status, "Completed")
+        self.assertEqual(booking.payment_status, "captured")
+        self.assertEqual(booking.payment_id, "pay_webhook_123")
+
+    def test_only_configured_admin_can_approve_host_verification(self):
+        self.app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+            "UPLOAD_FOLDER": os.path.join(self.temp_dir.name, "uploads"),
+            "ADMIN_USERNAMES": ("trusted_moderator",),
+        })
+        self.client = self.app.test_client()
+        moderator = self.app.test_client()
+        self.register(moderator, "trusted_moderator")
+        host = self.app.test_client()
+        self.register(host, "pending_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page),
+            "location": "Verification badge garage",
+            "price_per_hour": "35",
+            "total_slots": "1",
+            "latitude": "19.0760",
+            "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+
+        forbidden = host.get("/admin")
+        self.assertEqual(forbidden.status_code, 403)
+        profile = host.get("/profile")
+        requested = host.post(
+            "/verification/request",
+            data={
+                "csrf_token": self.csrf(profile),
+                "verification_note": "Please review my host account.",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Verification request sent", requested.data)
+        self.assertEqual(data_store.users_db["pending_host"].verification_status, "pending")
+        self.assertNotIn(b"Moderation", host.get("/dashboard").data)
+
+        panel = moderator.get("/admin")
+        self.assertEqual(panel.status_code, 200)
+        self.assertIn(b"Please review my host account.", panel.data)
+        approved = moderator.post("/admin", data={
+            "csrf_token": self.csrf(panel),
+            "action": "verify",
+            "username": "pending_host",
+        }, follow_redirects=True)
+        self.assertEqual(data_store.users_db["pending_host"].verification_status, "verified")
+        self.assertIsNotNone(data_store.users_db["pending_host"].verified_at)
+        browse = self.client.get("/spots")
+        self.assertIn(b"Verified host", browse.data)
+        self.assertIn(b"Moderation", moderator.get("/dashboard").data)
+
+        data_store.configure_storage(self.database_path)
+        self.assertEqual(data_store.users_db["pending_host"].verification_status, "verified")
+
+    def test_completed_booking_reviews_and_reports_are_moderated_and_persisted(self):
+        self.app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+            "UPLOAD_FOLDER": os.path.join(self.temp_dir.name, "uploads"),
+            "ADMIN_USERNAMES": ("review_moderator",),
+        })
+        self.client = self.app.test_client()
+        moderator = self.app.test_client()
+        self.register(moderator, "review_moderator")
+        host = self.app.test_client()
+        self.register(host, "review_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page),
+            "location": "Trust review garage",
+            "price_per_hour": "45",
+            "total_slots": "1",
+            "latitude": "19.0760",
+            "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        driver = self.app.test_client()
+        self.register(driver, "review_driver")
+        browse = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(browse),
+            "spot_id": "1",
+            "hours": "1",
+            "start_time": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+        })
+        booking = data_store.bookings_db[0]
+        booking.start_time = datetime.now() - timedelta(minutes=1)
+        booking.entry_time = booking.start_time
+        booking.end_time = datetime.now() + timedelta(hours=1)
+        data_store.persist()
+        booking_page = driver.get("/bookings")
+        driver.post(
+            "/bookings/" + str(booking.booking_id) + "/checkout",
+            data={"csrf_token": self.csrf(booking_page)},
+        )
+        self.assertEqual(booking.status, "Completed")
+
+        driver_page = driver.get("/bookings")
+        self.assertIn(b"Review your host", driver_page.data)
+        review_response = driver.post(
+            "/bookings/" + str(booking.booking_id) + "/reviews",
+            data={
+                "csrf_token": self.csrf(driver_page),
+                "rating": "5",
+                "review_text": "The space was exactly as described.",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Thanks for sharing your review", review_response.data)
+        host_page = host.get("/bookings")
+        host_review = host.post(
+            "/bookings/" + str(booking.booking_id) + "/reviews",
+            data={
+                "csrf_token": self.csrf(host_page),
+                "rating": "4",
+                "review_text": "The driver followed the parking instructions.",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Thanks for sharing your review", host_review.data)
+        self.assertEqual(len(data_store.reviews), 2)
+
+        panel = driver.get("/spots")
+        self.assertIn(b"5.0 / 5 from 1 verified booking review", panel.data)
+        duplicate = driver.post(
+            "/bookings/" + str(booking.booking_id) + "/reviews",
+            data={
+                "csrf_token": self.csrf(driver.get("/bookings")),
+                "rating": "3",
+                "review_text": "A second review should not be allowed.",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"already reviewed", duplicate.data)
+        self.assertEqual(len(data_store.reviews), 2)
+
+        report_page = driver.get("/spots")
+        report_response = driver.post("/reports/create", data={
+            "csrf_token": self.csrf(report_page),
+            "target_type": "user",
+            "target_id": "review_host",
+            "reason": "other",
+            "details": "Please review this account activity.",
+        }, follow_redirects=True)
+        self.assertIn(b"Your report was sent", report_response.data)
+        report = data_store.reports[0]
+        panel = moderator.get("/admin")
+        self.assertIn(b"Please review this account activity.", panel.data)
+        moderator.post("/admin", data={
+            "csrf_token": self.csrf(panel),
+            "action": "action_report",
+            "report_id": str(report["id"]),
+            "resolution": "Reviewed and contacted the host.",
+        })
+        self.assertEqual(report["status"], "actioned")
+        self.assertIn("Reviewed and contacted", report["resolution"])
+        self.assertTrue(data_store.users_db["review_host"].is_suspended)
+
+        panel = moderator.get("/admin")
+        moderator.post("/admin", data={
+            "csrf_token": self.csrf(panel),
+            "action": "hide_review",
+            "review_id": str(data_store.reviews[0]["id"]),
+        })
+        self.assertFalse(data_store.reviews[0]["visible"])
+        self.assertNotIn(b"The space was exactly as described.", driver.get("/spots").data)
+        data_store.configure_storage(self.database_path)
+        self.assertEqual(len(data_store.reviews), 2)
+        self.assertEqual(len(data_store.reports), 1)
+        self.assertEqual(data_store.reports[0]["status"], "actioned")
+        self.assertFalse(data_store.reviews[0]["visible"])
 
     def test_driver_cannot_book_a_vehicle_incompatible_spot(self):
         self.register(self.client, "motorcyclist", vehicle_type="Motorcycle")

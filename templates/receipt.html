@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Receipt · Booking #{{ booking.booking_id }}{% endblock %}
+{% block content %}
+<section class="page-header narrow">
+  <span class="eyebrow">PARKSHARE RECEIPT</span>
+  <h1>Booking #{{ booking.booking_id }}</h1>
+  <p>Receipt PS-{{ "%06d"|format(booking.booking_id) }}</p>
+</section>
+<section class="panel-list invoice-panel">
+  <dl class="invoice-details">
+    <dt>Driver</dt><dd>{{ customer }}</dd>
+    <dt>Host</dt><dd>{{ host_name }}</dd>
+    <dt>Parking location</dt><dd>{{ spot.location }}</dd>
+    <dt>Space</dt><dd>#{{ booking.slot_number }}</dd>
+    <dt>Reserved</dt><dd>{{ booking.start_time.strftime("%d %b %Y, %I:%M %p") }} – {{ booking.end_time.strftime("%d %b %Y, %I:%M %p") }}</dd>
+    <dt>Checked out</dt><dd>{{ booking.exit_time.strftime("%d %b %Y, %I:%M %p") if booking.exit_time else "—" }}</dd>
+    <dt>Billed hours</dt><dd>{{ booking.billed_hours or booking.planned_hours }}</dd>
+    <dt>Rate</dt><dd>₹{{ "%.2f"|format(booking.price_per_hour) }} / hour</dd>
+    <dt>Total</dt><dd><strong>₹{{ "%.2f"|format(booking.final_cost or 0) }}</strong></dd>
+    <dt>Payment status</dt>
+    <dd>
+      {% if booking.payment_status == "captured" %}
+        Paid via Razorpay{% if booking.payment_id %} · {{ booking.payment_id }}{% endif %}
+      {% else %}
+        Demo checkout — no payment was processed
+      {% endif %}
+    </dd>
+  </dl>
+  <p class="muted">This receipt is not a tax invoice.</p>
+  <button class="button primary no-print" type="button" onclick="window.print()">Print / Save as PDF</button>
+</section>
+{% endblock %}

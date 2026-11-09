@@ -105,7 +105,8 @@ def release_spot():
 
     booking_id = ask_int("Enter Booking ID to release: ")
     booking = data_store.find_booking(booking_id)
-    if booking is None or booking.status != "Active" or booking.driver_username != user.username:
+    if (booking is None or booking.status not in ("Active", "Checked In")
+            or booking.driver_username != user.username):
         print("Invalid booking ID.")
         return
 
@@ -166,7 +167,7 @@ def cancel_booking():
 
     mine = []
     for booking in data_store.active_bookings():
-        if booking.driver_username == user.username:
+        if booking.status == "Active" and booking.driver_username == user.username:
             mine.append(booking)
     if not mine:
         print("You have no active bookings to cancel.")
@@ -218,7 +219,7 @@ def show_my_bookings():
         else:
             total = "Rs " + str(booking.final_cost)
         extra = ""
-        if booking.status == "Active":
+        if booking.status in ("Active", "Checked In"):
             running = billing_module.final_cost(spot.price_per_hour, booking.entry_time, datetime.now(), booking.planned_hours)[0]
             extra = " | Running: Rs " + str(running) + " | Parked: " + elapsed_text(booking.entry_time)
         print("Booking #" + str(booking.booking_id), "| Spot #" + str(booking.spot_id), "|", spot.location, "| Slot", booking.slot_number, "|", booking.status, "| Total:", total, extra)

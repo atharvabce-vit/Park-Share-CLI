@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Admin moderation{% endblock %}
+{% block content %}
+<section class="page-header narrow">
+  <span class="eyebrow">SYSTEM SAFETY</span>
+  <h1>Moderation dashboard</h1>
+  <p>Review host verification requests, user reports, reviews, and account status.</p>
+</section>
+
+<section class="admin-section">
+  <div class="section-heading"><div><span class="eyebrow">HOST TRUST</span><h2>Verification requests <span class="muted-count">{{ verification_requests|length }}</span></h2></div></div>
+  {% for user in verification_requests %}
+  <article class="admin-card">
+    <div><strong>{{ user.full_name or user.username }}</strong> · {{ user.username }}<p>{{ user.verification_note or "No note provided." }}</p></div>
+    <div class="admin-actions">
+      <form method="post" action="{{ url_for('admin') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="username" value="{{ user.username }}"><input type="hidden" name="action" value="verify">
+        <button class="button primary small" type="submit">Verify host</button>
+      </form>
+      <form method="post" action="{{ url_for('admin') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="username" value="{{ user.username }}"><input type="hidden" name="action" value="reject_verification">
+        <button class="button danger-outline small" type="submit">Reject</button>
+      </form>
+    </div>
+  </article>
+  {% else %}
+  <p class="muted">No pending verification requests.</p>
+  {% endfor %}
+</section>
+
+<section class="admin-section">
+  <div class="section-heading"><div><span class="eyebrow">COMMUNITY SAFETY</span><h2>Open reports <span class="muted-count">{{ open_reports|length }}</span></h2></div></div>
+  {% for report in open_reports %}
+  <article class="admin-card">
+    <div>
+      <strong>Report #{{ report.id }} · {{ report.target_type|title }}: {{ report_targets[report.id] }}</strong>
+      <p>By {{ report.reporter }} · {{ report.reason|replace("_", " ")|title }} · {{ report.created_at.strftime("%d %b %Y, %I:%M %p") }}</p>
+      <p>{{ report.details }}</p>
+    </div>
+    <form method="post" action="{{ url_for('admin') }}" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="report_id" value="{{ report.id }}">
+      <label class="field">Resolution note<textarea name="resolution" rows="2" maxlength="500" required></textarea></label>
+      <div class="admin-actions">
+        <button class="button secondary small" name="action" value="resolve_report" type="submit">Resolve</button>
+        <button class="button danger-outline small" name="action" value="action_report" type="submit">Take action</button>
+      </div>
+    </form>
+  </article>
+  {% else %}
+  <p class="muted">No open reports.</p>
+  {% endfor %}
+</section>
+
+<section class="panel-list admin-panel">
+  <div class="section-heading"><div><span class="eyebrow">ACCOUNT MANAGEMENT</span><h2>Accounts</h2></div></div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Role</th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Verification</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td>{{ user.username }}</td>
+        <td>{{ user.role }}</td>
+        <td>{{ user.full_name or '—' }}</td>
+        <td>{{ user.email or '—' }}</td>
+        <td>{% if user.role == "Host" %}{{ user.verification_status|title }}{% else %}—{% endif %}</td>
+        <td>
+          {% if user.is_suspended %}
+            <span class="status-pill danger">Suspended</span>
+            <small>{{ user.suspended_reason or 'Account restricted by admin.' }}</small>
+          {% else %}
+            <span class="status-pill ok">Active</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if user.username != signed_in_user.username %}
+          <form method="post" action="{{ url_for('admin') }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="username" value="{{ user.username }}">
+            {% if user.is_suspended %}
+              <input type="hidden" name="action" value="unsuspend">
+              <button type="submit" class="button secondary small">Restore</button>
+            {% else %}
+              <input type="hidden" name="action" value="suspend">
+              <input type="text" name="reason" maxlength="200" placeholder="Reason" class="admin-reason">
+              <button type="submit" class="button danger small">Suspend</button>
+            {% endif %}
+          </form>
+          {% else %}
+          <span class="muted">You</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="admin-section">
+  <div class="section-heading"><div><span class="eyebrow">REVIEW QUALITY</span><h2>Booking reviews</h2></div></div>
+  {% for review in reviews|sort(attribute="created_at", reverse=true) %}
+  <article class="admin-card">
+    <div>
+      <strong>{{ review.rating }} / 5 · {{ review.reviewer }} → {{ review.target }}</strong>
+      <p>Booking #{{ review.booking_id }} · {{ review.created_at.strftime("%d %b %Y, %I:%M %p") }}</p>
+      <p>{{ review.text }}</p>
+      {% if not review.visible %}<span class="status-pill danger">Hidden</span>{% endif %}
+    </div>
+    <form method="post" action="{{ url_for('admin') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="review_id" value="{{ review.id }}">
+      {% if review.visible %}
+        <button class="button danger-outline small" name="action" value="hide_review" type="submit">Hide review</button>
+      {% else %}
+        <button class="button secondary small" name="action" value="restore_review" type="submit">Restore</button>
+      {% endif %}
+    </form>
+  </article>
+  {% else %}
+  <p class="muted">No reviews yet.</p>
+  {% endfor %}
+</section>
+{% endblock %}

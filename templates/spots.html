@@ -33,13 +33,38 @@
   <article class="spot-card">
     <div class="spot-visual">{% if spot.photo %}<img src="{{ url_for('static', filename=spot.photo) }}" alt="Parking at {{ spot.location }}">{% else %}<span class="spot-visual-icon">⌖</span>{% endif %}<span class="badge available">{{ availability[spot.spot_id] }} / {{ spot.total_slots }} open for this time</span></div>
     <div class="spot-body">
-      <div class="spot-title"><h2>{{ spot.location }}</h2><span class="rating">★ {{ spot.average_rating() if spot.average_rating() is not none else "New" }}</span></div>
+      <div class="spot-title"><h2>{{ spot.location }}</h2><span class="rating">★ {% if host_reviews.get(spot.host_username) %}{{ host_reviews[spot.host_username].average }}{% else %}{{ spot.average_rating() if spot.average_rating() is not none else "New" }}{% endif %}</span></div>
       {% if spot.is_demo %}<p class="demo-listing-label"><strong>BUILT-IN SAMPLE · NOT REAL PARKING</strong><br>Illustrative location, price, availability, and booking only. Do not travel here for parking.</p>{% endif %}
       <p class="recommendation-meta">{% if distances.get(spot.spot_id) is not none %}{{ "%.1f"|format(distances[spot.spot_id]) }} km away · {% endif %}{{ recommendation_scores[spot.spot_id] }}% match · Fits {{ spot.vehicle_types|join(", ") }}</p>
       <p>{{ spot.description or "A convenient local parking space, ready when you are." }}</p>
       {% if not spot.is_demo %}<a class="text-link" href="{{ map_url(spot.location) }}" target="_blank" rel="noopener noreferrer">Open location in OpenStreetMap →</a>{% endif %}
       <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
-      <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>{% if spot.is_demo %}Built-in demo host{% else %}Host · {{ spot.host_username }}{% endif %}</span></div>
+      <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>{% if spot.is_demo %}Built-in demo host{% else %}Host · {{ spot.host_username }}{% if find_user(spot.host_username) and find_user(spot.host_username).verification_status == "verified" %} · <span class="status-pill ok">Verified host</span>{% endif %}{% endif %}</span></div>
+      {% if not spot.is_demo and host_reviews.get(spot.host_username) %}
+      <section class="host-review-preview">
+        <small>{{ host_reviews[spot.host_username].average }} / 5 from {{ host_reviews[spot.host_username].ratings|length }} verified booking review{% if host_reviews[spot.host_username].ratings|length != 1 %}s{% endif %}</small>
+        {% for review in host_reviews[spot.host_username].reviews %}<p>“{{ review.text }}” <span>— {{ review.reviewer }}</span></p>{% endfor %}
+      </section>
+      {% endif %}
+      {% if signed_in_user and not spot.is_demo and signed_in_user.username != spot.host_username %}
+      <details class="report-details">
+        <summary>Report listing or host</summary>
+        <form method="post" action="{{ url_for('create_report') }}" class="stack-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="target_type" value="spot"><input type="hidden" name="target_id" value="{{ spot.spot_id }}">
+          <label class="field">Report reason<select name="reason" required><option value="">Choose one</option><option value="misleading_listing">Misleading listing</option><option value="unsafe_behavior">Safety concern</option><option value="fraud">Suspected fraud</option><option value="harassment">Harassment</option><option value="other">Other</option></select></label>
+          <label class="field">Details<textarea name="details" maxlength="1000" required></textarea></label>
+          <button class="button secondary" type="submit">Report this listing</button>
+        </form>
+        <form method="post" action="{{ url_for('create_report') }}" class="stack-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="target_type" value="user"><input type="hidden" name="target_id" value="{{ spot.host_username }}">
+          <label class="field">Report the host<select name="reason" required><option value="">Choose one</option><option value="unsafe_behavior">Safety concern</option><option value="fraud">Suspected fraud</option><option value="harassment">Harassment</option><option value="other">Other</option></select></label>
+          <label class="field">Details<textarea name="details" maxlength="1000" required></textarea></label>
+          <button class="button secondary" type="submit">Report host</button>
+        </form>
+      </details>
+      {% endif %}
       {% if signed_in_user and signed_in_user.role == "Driver" or not signed_in_user %}
       <form method="post" action="{{ url_for('create_booking') }}" class="book-row">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="spot_id" value="{{ spot.spot_id }}">

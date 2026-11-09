@@ -2,7 +2,7 @@ from datetime import timedelta
 
 
 class User:
-    def __init__(self, username, password, role, full_name="", email="", phone="", vehicle_type="", vehicle_plate=""):
+    def __init__(self, username, password, role, full_name="", email="", phone="", vehicle_type="", vehicle_plate="", is_suspended=False, suspended_reason="", verification_status="unverified", verification_note="", verified_at=None):
         self.username = username
         self.password = password
         self.role = role
@@ -11,6 +11,11 @@ class User:
         self.phone = phone
         self.vehicle_type = vehicle_type
         self.vehicle_plate = vehicle_plate
+        self.is_suspended = bool(is_suspended)
+        self.suspended_reason = suspended_reason or ""
+        self.verification_status = verification_status or "unverified"
+        self.verification_note = verification_note or ""
+        self.verified_at = verified_at
 
 
 class ParkingSpot:
@@ -57,7 +62,7 @@ class ParkingSpot:
 class Booking:
     def __init__(self, booking_id, spot_id, driver_username, planned_hours, price_per_hour,
                  entry_time, slot_number=None, start_time=None, end_time=None,
-                 guest_name="", guest_id=""):
+                 guest_name="", guest_id="", checkin_time=None):
         self.booking_id = booking_id
         self.spot_id = spot_id
         self.driver_username = driver_username
@@ -69,7 +74,12 @@ class Booking:
         self.slot_number = slot_number
         self.guest_name = guest_name
         self.guest_id = guest_id
+        self.checkin_time = checkin_time
         self.exit_time = None
         self.billed_hours = None
         self.final_cost = None
         self.status = "Active"
+        self.payment_status = "unpaid"
+        self.payment_order_id = ""
+        self.payment_id = ""
+        self.payment_amount = None

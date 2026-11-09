@@ -48,12 +48,41 @@ def create_user(username, password, role, full_name="", email="", phone="",
     return user
 
 
+def suspend_user(username, reason):
+    user = data_store.users_db.get(username)
+    if user is None:
+        raise ValueError("That user does not exist.")
+    user.is_suspended = True
+    user.suspended_reason = reason.strip()[:200] if reason else "Account suspended by an administrator."
+    data_store.suspended_users.add(username)
+    data_store.log_event(f"User {username} was suspended: {user.suspended_reason}")
+    return user
+
+
+def unsuspend_user(username):
+    user = data_store.users_db.get(username)
+    if user is None:
+        raise ValueError("That user does not exist.")
+    user.is_suspended = False
+    user.suspended_reason = ""
+    data_store.suspended_users.discard(username)
+    data_store.log_event(f"User {username} was reinstated.")
+    return user
+
+
 def authenticate(username, password):
-    user = data_store.users_db.get(username.strip())
+    username = (username or "").strip()
+    if not username or not password:
+        return None
+    user = data_store.users_db.get(username)
     if user is None:
         user = next((candidate for name, candidate in data_store.users_db.items()
-                     if name.lower() == username.strip().lower()), None)
-    if user is None or not check_password_hash(user.password, password):
+                     if name.lower() == username.lower()), None)
+    if user is None:
+        return None
+    if user.is_suspended:
+        return None
+    if not check_password_hash(user.password, password):
         return None
     return user
 

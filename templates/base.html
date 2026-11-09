@@ -22,6 +22,7 @@
           <a href="{{ url_for('host_spots') }}">My listings</a>
           <a href="{{ url_for('earnings') }}">Earnings</a>
         {% endif %}
+        {% if admin_access %}<a href="{{ url_for('admin') }}">Moderation</a>{% endif %}
         <a href="{{ url_for('activity') }}">Activity</a>
         <form class="nav-form" method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

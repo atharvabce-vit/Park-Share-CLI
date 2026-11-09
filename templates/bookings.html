@@ -10,20 +10,48 @@
       <div class="booking-head"><div><span class="step-tag">BOOKING #{{ booking.booking_id }}</span><h2>{{ spot.location }}</h2></div><span class="badge {{ booking.status|lower }}">{{ booking.status }}</span></div>
       <div class="booking-meta"><span>Space #{{ booking.slot_number }}</span><span>{{ booking.planned_hours }} hour{% if booking.planned_hours != 1 %}s{% endif %}</span><span>₹{{ "%.2f"|format(booking.price_per_hour) }} / hour</span><span>{{ (booking.start_time or booking.entry_time).strftime("%d %b %Y, %I:%M %p") }} – {{ booking.end_time.strftime("%I:%M %p") if booking.end_time else "" }}</span></div>
       {% if booking.guest_name %}<p>Guest booking for {{ booking.guest_name }}</p>{% endif %}
-      {% if booking.status == "Active" and (signed_in_user is none or signed_in_user.role == "Driver") %}
+      {% if booking.status in ("Active", "Checked In") and (signed_in_user is none or signed_in_user.role == "Driver") %}
       <div class="booking-actions">
         <form method="post" action="{{ url_for('checkout', booking_id=booking.booking_id) }}" class="checkout-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label class="field">Promo code <input name="promo_code" maxlength="30" placeholder="Optional"></label>
           <label class="field">Rate your stay <select name="rating"><option value="">Skip rating</option>{% for star in range(5, 0, -1) %}<option value="{{ star }}">{{ star }} star{% if star != 1 %}s{% endif %}</option>{% endfor %}</select></label>
-          <button class="button primary" type="submit">Checkout</button>
+          <button class="button primary" type="submit">{{ "Checkout and pay" if payment_enabled else "Checkout" }}</button>
         </form>
+        {% if booking.status == "Active" and booking.booking_id in checkin_allowed %}
+        <form method="post" action="{{ url_for('check_in', booking_id=booking.booking_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button secondary" type="submit">Check in</button>
+        </form>
+        {% endif %}
+        {% if booking.status == "Active" and booking.payment_status == "unpaid" %}
         <form method="post" action="{{ url_for('cancel_booking', booking_id=booking.booking_id) }}" onsubmit="return confirm('Cancel this active booking?');">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button danger-outline" type="submit">Cancel booking</button>
         </form>
+        {% endif %}
       </div>
       {% elif booking.status == "Completed" %}
-      <div class="completed-total"><span>Checked out {{ booking.exit_time.strftime("%d %b %Y, %I:%M %p") if booking.exit_time else "" }}</span><strong>₹{{ "%.2f"|format(booking.final_cost or 0) }}</strong></div>
+      <div class="completed-total"><span>Checked out {{ booking.exit_time.strftime("%d %b %Y, %I:%M %p") if booking.exit_time else "" }}</span><strong>₹{{ "%.2f"|format(booking.final_cost or 0) }}</strong><a href="{{ url_for('booking_receipt', booking_id=booking.booking_id) }}">View receipt</a></div>
+      {% if signed_in_user and booking.booking_id not in reviewed_bookings %}
+        {% if signed_in_user.role == "Driver" and booking.driver_username == signed_in_user.username %}
+          {% set review_target = spot.host_username %}
+        {% elif signed_in_user.role == "Host" and spot.host_username == signed_in_user.username and booking.driver_username != "Guest" %}
+          {% set review_target = booking.driver_username %}
+        {% else %}
+          {% set review_target = none %}
+        {% endif %}
+        {% if review_target %}
+        <form method="post" action="{{ url_for('submit_review', booking_id=booking.booking_id) }}" class="review-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <strong>Review {{ "your host" if signed_in_user.role == "Driver" else "this driver" }}</strong>
+          <label class="field">Rating<select name="rating" required><option value="">Choose 1–5</option>{% for star in range(5, 0, -1) %}<option value="{{ star }}">{{ star }} star{% if star != 1 %}s{% endif %}</option>{% endfor %}</select></label>
+          <label class="field">Your review<textarea name="review_text" rows="2" maxlength="1000" required placeholder="Share a helpful, respectful review"></textarea></label>
+          <button class="button secondary" type="submit">Submit review</button>
+        </form>
+        {% endif %}
+      {% elif signed_in_user and booking.booking_id in reviewed_bookings %}
+      <p class="muted">You reviewed this booking. Thank you for helping build trust.</p>
+      {% endif %}
       {% endif %}
     </article>
   {% endfor %}
@@ -32,3 +60,9 @@
 <section class="empty-state"><span>▤</span><h2>No bookings yet</h2><p>{% if signed_in_user is none or signed_in_user.role == "Driver" %}Find a space that works for you and your first booking will appear here.{% else %}Once drivers book your listings, you can follow their status here.{% endif %}</p>{% if signed_in_user is none or signed_in_user.role == "Driver" %}<a class="button primary" href="{{ url_for('spots') }}">Explore spaces</a>{% endif %}</section>
 {% endif %}
 {% endblock %}
+{% if payment_enabled %}
+{% block page_scripts %}
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="{{ url_for('static', filename='payment.js') }}"></script>
+{% endblock %}
+{% endif %}

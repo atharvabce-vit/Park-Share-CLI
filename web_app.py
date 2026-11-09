@@ -1,5 +1,6 @@
 import hmac
 import hashlib
+import json
 import math
 import os
 import re
@@ -13,11 +14,12 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
 
-from flask import Flask, abort, current_app, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 
 import auth_module
 import billing_module
 import data_store
+import payment_module
 import tomtom_parking
 from models import ParkingSpot, Booking
 from werkzeug.security import generate_password_hash
@@ -184,9 +186,27 @@ def create_app(test_config=None):
             "PARKSHARE_PUBLIC_URL",
             "http://127.0.0.1:" + os.environ.get("PARKSHARE_PORT", "5000"),
         ),
+        RAZORPAY_KEY_ID=os.environ.get("PARKSHARE_RAZORPAY_KEY_ID", "").strip(),
+        RAZORPAY_KEY_SECRET=os.environ.get("PARKSHARE_RAZORPAY_KEY_SECRET", "").strip(),
+        RAZORPAY_WEBHOOK_SECRET=os.environ.get("PARKSHARE_RAZORPAY_WEBHOOK_SECRET", "").strip(),
+        PAYMENT_MODE=os.environ.get("PARKSHARE_PAYMENT_MODE", "disabled").strip().lower(),
+        ADMIN_USERNAMES=tuple(
+            name.strip().casefold()
+            for name in os.environ.get("PARKSHARE_ADMIN_USERNAMES", "").split(",")
+            if name.strip()
+        ),
     )
     if test_config:
         app.config.update(test_config)
+    if app.config["PAYMENT_MODE"] not in ("disabled", "test", "live"):
+        raise ValueError("PARKSHARE_PAYMENT_MODE must be disabled, test, or live.")
+    if app.config["PAYMENT_MODE"] != "disabled":
+        if not app.config["RAZORPAY_KEY_ID"] or not app.config["RAZORPAY_KEY_SECRET"]:
+            raise RuntimeError("Razorpay key ID and secret are required when payments are enabled.")
+        expected_prefix = "rzp_test_" if app.config["PAYMENT_MODE"] == "test" else "rzp_live_"
+        if not app.config["RAZORPAY_KEY_ID"].startswith(expected_prefix):
+            raise ValueError("Razorpay key ID does not match the configured payment mode.")
+    app.config["PAYMENT_ENABLED"] = app.config["PAYMENT_MODE"] != "disabled"
     data_store.configure_builtin_listings(app.config["DEMO_MODE"])
 
     def current_user():
@@ -224,13 +244,60 @@ def create_app(test_config=None):
         guest_id = session.get("guest_id")
         return bool(guest_id and booking.guest_id == guest_id)
 
+    def complete_checkout(booking, actor, spot, exit_time, hours, final_amount,
+                          rating_raw="", payment_id=""):
+        booking.exit_time = exit_time
+        booking.billed_hours = hours
+        booking.final_cost = final_amount
+        booking.status = "Completed"
+        if payment_id:
+            booking.payment_id = payment_id
+            booking.payment_status = "captured"
+        data_store.refresh_availability(spot)
+        if rating_raw:
+            try:
+                rating = int(rating_raw)
+                if rating < 1 or rating > 5:
+                    raise ValueError()
+            except ValueError:
+                flash("Checkout completed, but the rating must be from 1 to 5.", "error")
+            else:
+                spot.add_rating(rating)
+                data_store.log_event(actor + " rated spot #" + str(spot.spot_id)
+                                     + " " + str(rating) + "/5")
+        data_store.log_event(actor + " released spot #" + str(spot.spot_id)
+                             + " | Rs " + str(final_amount))
+        data_store.add_notification(
+            spot.host_username,
+            actor + " completed booking #" + str(booking.booking_id) + ".",
+        )
+        data_store.persist()
+
     @app.before_request
     def protect_forms():
         if request.method == "POST":
+            if request.endpoint == "razorpay_webhook":
+                return None
             submitted = request.form.get("csrf_token", "")
             expected = session.get("_csrf_token", "")
             if not submitted or not expected or not hmac.compare_digest(submitted, expected):
                 abort(400, description="Form expired or invalid. Reload the page and try again.")
+
+    @app.before_request
+    def enforce_login_rate_limit():
+        if request.path != url_for("login"):
+            return None
+        if request.method != "POST":
+            return None
+        remote_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
+        key = remote_ip.split(",")[0].strip() or "unknown"
+        attempts = data_store.login_attempts.setdefault(key, [])
+        now = datetime.now()
+        attempts[:] = [stamp for stamp in attempts if now - stamp < timedelta(minutes=15)]
+        if len(attempts) >= 5:
+            flash("Too many sign-in attempts. Please wait 15 minutes and try again.", "error")
+            abort(429, description="Too many login attempts.")
+        return None
 
     @app.context_processor
     def template_context():
@@ -242,11 +309,17 @@ def create_app(test_config=None):
         return {
             "csrf_token": csrf_token,
             "find_spot": data_store.find_spot,
+            "find_user": lambda username: data_store.users_db.get(username),
             "signed_in_user": user,
             "guest_name": session.get("guest_name", ""),
             "has_guest_bookings": bool(session.get("guest_id")),
             "demo_mode": current_app.config["DEMO_MODE"],
             "tomtom_enabled": bool(current_app.config["TOMTOM_API_KEY"]),
+            "payment_enabled": current_app.config["PAYMENT_ENABLED"],
+            "razorpay_key_id": current_app.config["RAZORPAY_KEY_ID"],
+            "admin_access": bool(
+                user and user.username.casefold() in current_app.config["ADMIN_USERNAMES"]
+            ),
             "unread_notifications": sum(
                 1 for item in data_store.notifications
                 if user and item["username"] == user.username and not item["read"]
@@ -308,13 +381,19 @@ def create_app(test_config=None):
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "POST":
-            user = auth_module.authenticate(
-                request.form.get("username", ""),
-                request.form.get("password", ""),
-            )
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            remote_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
+            key = remote_ip.split(",")[0].strip() or "unknown"
+            attempts = data_store.login_attempts.setdefault(key, [])
+            now = datetime.now()
+            attempts[:] = [stamp for stamp in attempts if now - stamp < timedelta(minutes=15)]
+            user = auth_module.authenticate(username, password)
             if user is None:
+                attempts.append(now)
                 flash("We couldn't match that username and password.", "error")
             else:
+                attempts.clear()
                 session.clear()
                 session["username"] = user.username
                 data_store.log_event(user.username + " logged in")
@@ -390,6 +469,10 @@ def create_app(test_config=None):
     @login_required
     def profile():
         user = current_user()
+        if user.is_suspended:
+            flash("This account is suspended: " + (user.suspended_reason or "Account suspended by an administrator."), "error")
+            session.clear()
+            return redirect(url_for("login"))
         if request.method == "POST":
             full_name = request.form.get("full_name", "").strip()
             email = request.form.get("email", "").strip().lower()
@@ -443,6 +526,15 @@ def create_app(test_config=None):
         for token_hash, (username, unused_expiry) in list(data_store.password_reset_tokens.items()):
             if username == user.username:
                 del data_store.password_reset_tokens[token_hash]
+        data_store.reviews[:] = [
+            review for review in data_store.reviews
+            if review["reviewer"] != user.username and review["target"] != user.username
+        ]
+        for report in data_store.reports:
+            if report["reporter"] == user.username:
+                report["reporter"] = "Deleted user"
+            if report["target_type"] == "user" and report["target_id"] == user.username:
+                report["target_id"] = "Deleted user"
         data_store.notifications[:] = [
             item for item in data_store.notifications if item["username"] != user.username
         ]
@@ -480,6 +572,10 @@ def create_app(test_config=None):
     @login_required
     def dashboard():
         user = current_user()
+        if user.is_suspended:
+            flash("This account is suspended: " + (user.suspended_reason or "Account suspended by an administrator."), "error")
+            session.clear()
+            return redirect(url_for("login"))
         active = [booking for booking in data_store.active_bookings()
                   if user.role == "Host"
                   and data_store.find_spot(booking.spot_id).host_username == user.username]
@@ -656,6 +752,20 @@ def create_app(test_config=None):
             results.sort(key=lambda item: availability[item.spot_id], reverse=True)
         else:
             results.sort(key=lambda item: recommendation_scores[item.spot_id], reverse=True)
+        host_reviews = {}
+        for review in data_store.reviews:
+            if not review["visible"]:
+                continue
+            summary = host_reviews.setdefault(review["target"], {"ratings": [], "reviews": []})
+            summary["ratings"].append(review["rating"])
+            summary["reviews"].append(review)
+        for summary in host_reviews.values():
+            summary["average"] = round(
+                sum(summary["ratings"]) / len(summary["ratings"]), 1
+            )
+            summary["reviews"] = sorted(
+                summary["reviews"], key=lambda item: item["created_at"], reverse=True
+            )[:2]
         return render_template(
             "spots.html",
             spots=results,
@@ -667,6 +777,7 @@ def create_app(test_config=None):
             demo_markers=demo_markers,
             vehicle_types=VEHICLE_TYPES,
             active_spot_count=sum(1 for spot in data_store.spots_db if spot.is_active),
+            host_reviews=host_reviews,
             filters={"location": request.args.get("location", ""),
                      "max_price": max_price_raw,
                      "covered": covered,
@@ -795,7 +906,20 @@ def create_app(test_config=None):
         else:
             mine = [booking for booking in data_store.bookings_db
                     if data_store.find_spot(booking.spot_id).host_username == user.username]
-        return render_template("bookings.html", bookings=mine)
+        now = datetime.now()
+        checkin_allowed = {
+            booking.booking_id for booking in mine
+            if booking.status == "Active"
+            and booking.start_time <= now <= booking.end_time
+        }
+        reviewed_bookings = {
+            review["booking_id"] for review in data_store.reviews
+            if user and review["reviewer"] == user.username
+        }
+        return render_template(
+            "bookings.html", bookings=mine, checkin_allowed=checkin_allowed,
+            reviewed_bookings=reviewed_bookings,
+        )
 
     @app.route("/bookings/create", methods=["POST"])
     def create_booking():
@@ -870,6 +994,12 @@ def create_app(test_config=None):
             booking = data_store.find_booking(booking_id)
             if booking is None or booking.status != "Active" or not owns_booking(booking):
                 abort(404)
+            if booking.payment_status != "unpaid":
+                flash("Finish or retry the pending payment before cancelling this booking.", "error")
+                return redirect(url_for("bookings"))
+            if datetime.now() >= booking.start_time:
+                flash("A booking cannot be cancelled after its start time.", "error")
+                return redirect(url_for("bookings"))
             user = current_user()
             actor = user.username if user else "Guest"
             booking.status = "Cancelled"
@@ -883,11 +1013,36 @@ def create_app(test_config=None):
         flash("Booking cancelled without charge.", "success")
         return redirect(url_for("bookings"))
 
+    @app.route("/bookings/<int:booking_id>/check-in", methods=["POST"])
+    def check_in(booking_id):
+        with booking_lock:
+            booking = data_store.find_booking(booking_id)
+            if booking is None or booking.status != "Active" or not owns_booking(booking):
+                abort(404)
+            now = datetime.now()
+            if now < booking.start_time or now > booking.end_time:
+                flash("Check-in is available only during the reserved time window.", "error")
+                return redirect(url_for("bookings"))
+            booking.status = "Checked In"
+            booking.checkin_time = now
+            booking.entry_time = now
+            spot = data_store.find_spot(booking.spot_id)
+            actor = current_user().username if current_user() else booking.guest_name or "A guest"
+            data_store.log_event(actor + " checked in for booking #" + str(booking_id))
+            data_store.add_notification(
+                spot.host_username, actor + " checked in for booking #" + str(booking_id) + "."
+            )
+            data_store.refresh_availability(spot)
+            data_store.persist()
+        flash("You are checked in. Enjoy your stay.", "success")
+        return redirect(url_for("bookings"))
+
     @app.route("/bookings/<int:booking_id>/checkout", methods=["POST"])
     def checkout(booking_id):
         with booking_lock:
             booking = data_store.find_booking(booking_id)
-            if booking is None or booking.status != "Active" or not owns_booking(booking):
+            if (booking is None or booking.status not in ("Active", "Checked In")
+                    or not owns_booking(booking)):
                 abort(404)
             user = current_user()
             actor = user.username if user else "Guest"
@@ -895,42 +1050,322 @@ def create_app(test_config=None):
                 flash("You cannot check out before your booking starts.", "error")
                 return redirect(url_for("bookings"))
             spot = data_store.find_spot(booking.spot_id)
+            if current_app.config["PAYMENT_ENABLED"]:
+                if booking.payment_status == "created":
+                    amount_paise = booking.payment_amount
+                    exit_time = booking.exit_time
+                    hours = booking.billed_hours
+                    final_amount = booking.final_cost
+                    order_id = booking.payment_order_id
+                else:
+                    exit_time = datetime.now()
+                    amount, hours, unused_overtime = billing_module.final_cost(
+                        booking.price_per_hour, booking.entry_time, exit_time,
+                        booking.planned_hours,
+                    )
+                    promo = request.form.get("promo_code", "").strip()
+                    final_amount, unused_discount, unused_rate = billing_module.apply_discount(
+                        amount, promo
+                    )
+                    amount_paise = int(round(final_amount * 100))
+                    if amount_paise < 100:
+                        return jsonify({
+                            "error": "Razorpay requires a minimum charge of ₹1. Remove the promo code and retry."
+                        }), 400
+                    try:
+                        order = payment_module.create_order(
+                            current_app.config["RAZORPAY_KEY_ID"],
+                            current_app.config["RAZORPAY_KEY_SECRET"],
+                            booking.booking_id,
+                            amount_paise,
+                        )
+                    except payment_module.PaymentError:
+                        app.logger.exception("Unable to create Razorpay order for booking %s",
+                                             booking.booking_id)
+                        return jsonify({"error": "Payment service is unavailable. Try again shortly."}), 502
+                    order_id = order.get("id", "")
+                    if (not order_id or order.get("amount") != amount_paise
+                            or order.get("currency") != "INR"):
+                        app.logger.error("Razorpay returned an invalid order for booking %s",
+                                         booking.booking_id)
+                        return jsonify({"error": "Payment service returned an invalid order."}), 502
+                    booking.exit_time = exit_time
+                    booking.billed_hours = hours
+                    booking.final_cost = final_amount
+                    booking.payment_amount = amount_paise
+                    booking.payment_order_id = order_id
+                    booking.payment_status = "created"
+                    data_store.persist()
+                return jsonify({
+                    "key_id": current_app.config["RAZORPAY_KEY_ID"],
+                    "order_id": order_id,
+                    "amount": amount_paise,
+                    "currency": "INR",
+                    "verify_url": url_for("verify_checkout_payment", booking_id=booking_id),
+                })
+
             exit_time = datetime.now()
-            amount, hours, overtime = billing_module.final_cost(
+            amount, hours, unused_overtime = billing_module.final_cost(
                 booking.price_per_hour, booking.entry_time, exit_time, booking.planned_hours,
             )
             promo = request.form.get("promo_code", "").strip()
             final_amount, discount, unused_rate = billing_module.apply_discount(amount, promo)
-            booking.exit_time = exit_time
-            booking.billed_hours = hours
-            booking.final_cost = final_amount
-            booking.status = "Completed"
-            data_store.refresh_availability(spot)
             rating_raw = request.form.get("rating", "")
-            if rating_raw:
-                try:
-                    rating = int(rating_raw)
-                    if rating < 1 or rating > 5:
-                        raise ValueError()
-                except ValueError:
-                    flash("Checkout completed, but the rating must be from 1 to 5.", "error")
-                    rating = None
-                if rating is not None:
-                    spot.add_rating(rating)
-                    data_store.log_event(actor + " rated spot #" + str(spot.spot_id)
-                                         + " " + str(rating) + "/5")
-            data_store.log_event(actor + " released spot #" + str(spot.spot_id)
-                                 + " | Rs " + str(final_amount))
-            data_store.add_notification(
-                spot.host_username,
-                actor + " completed booking #" + str(booking_id) + ".",
-            )
-            data_store.persist()
+            complete_checkout(booking, actor, spot, exit_time, hours, final_amount, rating_raw)
         if promo and not discount:
             flash("Checkout complete. That promo code was not recognized.", "error")
         else:
             flash("Checkout complete — final total: ₹" + format(final_amount, ".2f") + ".", "success")
         return redirect(url_for("bookings"))
+
+    @app.route("/bookings/<int:booking_id>/payment/verify", methods=["POST"])
+    def verify_checkout_payment(booking_id):
+        with booking_lock:
+            booking = data_store.find_booking(booking_id)
+            if booking is None or not owns_booking(booking):
+                abort(404)
+            order_id = request.form.get("razorpay_order_id", "")
+            payment_id = request.form.get("razorpay_payment_id", "")
+            signature = request.form.get("razorpay_signature", "")
+            if (booking.status == "Completed" and booking.payment_status == "captured"
+                    and order_id == booking.payment_order_id and payment_id == booking.payment_id):
+                flash("Payment received and checkout complete.", "success")
+                return redirect(url_for("bookings"))
+            if booking.status not in ("Active", "Checked In"):
+                abort(404)
+            if (booking.payment_status != "created"
+                    or order_id != booking.payment_order_id
+                    or not payment_module.verify_checkout_signature(
+                        current_app.config["RAZORPAY_KEY_ID"],
+                        current_app.config["RAZORPAY_KEY_SECRET"],
+                        order_id,
+                        payment_id,
+                        signature,
+                    )):
+                abort(400, description="Payment verification failed.")
+            try:
+                payment = payment_module.fetch_payment(
+                    current_app.config["RAZORPAY_KEY_ID"],
+                    current_app.config["RAZORPAY_KEY_SECRET"],
+                    payment_id,
+                )
+            except payment_module.PaymentError:
+                app.logger.exception("Unable to verify Razorpay payment %s", payment_id)
+                return jsonify({"error": "Payment verification is temporarily unavailable."}), 502
+            if (payment.get("order_id") != order_id
+                    or payment.get("amount") != booking.payment_amount
+                    or payment.get("currency") != "INR"
+                    or payment.get("status") != "captured"):
+                abort(400, description="Payment has not been captured for this booking.")
+            spot = data_store.find_spot(booking.spot_id)
+            actor = current_user().username if current_user() else booking.guest_name or "A guest"
+            complete_checkout(
+                booking, actor, spot, booking.exit_time, booking.billed_hours,
+                booking.final_cost, request.form.get("rating", ""), payment_id,
+            )
+        flash("Payment received and checkout complete.", "success")
+        return redirect(url_for("bookings"))
+
+    @app.route("/bookings/<int:booking_id>/receipt")
+    def booking_receipt(booking_id):
+        booking = data_store.find_booking(booking_id)
+        if booking is None or booking.status != "Completed":
+            abort(404)
+        user = current_user()
+        spot = data_store.find_spot(booking.spot_id)
+        if user:
+            allowed = (
+                user.role == "Driver" and booking.driver_username == user.username
+            ) or (spot is not None and spot.host_username == user.username)
+        else:
+            guest_id = session.get("guest_id", "")
+            allowed = bool(guest_id and booking.guest_id == guest_id)
+        if not allowed or spot is None:
+            abort(404)
+        driver = data_store.users_db.get(booking.driver_username)
+        customer = booking.guest_name or (
+            (driver.full_name or driver.username) if driver else booking.driver_username
+        )
+        host = data_store.users_db.get(spot.host_username)
+        return render_template(
+            "receipt.html",
+            booking=booking,
+            spot=spot,
+            customer=customer,
+            host_name=(host.full_name or host.username) if host else spot.host_username,
+        )
+
+    @app.route("/bookings/<int:booking_id>/reviews", methods=["POST"])
+    @login_required
+    def submit_review(booking_id):
+        user = current_user()
+        booking = data_store.find_booking(booking_id)
+        spot = data_store.find_spot(booking.spot_id) if booking else None
+        if booking is None or spot is None or booking.status != "Completed":
+            abort(404)
+        if user.role == "Driver" and booking.driver_username == user.username:
+            target_username = spot.host_username
+        elif user.role == "Host" and spot.host_username == user.username:
+            target_username = booking.driver_username
+        else:
+            abort(404)
+        if target_username == "Guest" or target_username not in data_store.users_db:
+            flash("A review is available only when both sides have an account.", "error")
+            return redirect(url_for("bookings"))
+        try:
+            rating = int(request.form.get("rating", ""))
+        except ValueError:
+            rating = 0
+        text = request.form.get("review_text", "").strip()
+        if rating not in range(1, 6):
+            flash("Choose a rating from 1 to 5.", "error")
+            return redirect(url_for("bookings"))
+        if not text or len(text) > 1000:
+            flash("Write a review of up to 1000 characters.", "error")
+            return redirect(url_for("bookings"))
+        with booking_lock:
+            if any(review["booking_id"] == booking_id
+                   and review["reviewer"] == user.username for review in data_store.reviews):
+                flash("You have already reviewed this completed booking.", "error")
+                return redirect(url_for("bookings"))
+            data_store.reviews.append({
+                "id": max((review["id"] for review in data_store.reviews), default=0) + 1,
+                "booking_id": booking_id,
+                "reviewer": user.username,
+                "target": target_username,
+                "rating": rating,
+                "text": text,
+                "created_at": datetime.now(),
+                "visible": True,
+            })
+            data_store.add_notification(
+                target_username, "You received a new ParkShare review."
+            )
+            data_store.log_event(user.username + " reviewed " + target_username
+                                 + " after booking #" + str(booking_id))
+        flash("Thanks for sharing your review.", "success")
+        return redirect(url_for("bookings"))
+
+    @app.route("/reports/create", methods=["POST"])
+    @login_required
+    def create_report():
+        reporter = current_user()
+        target_type = request.form.get("target_type", "")
+        target_id = request.form.get("target_id", "").strip()
+        reason = request.form.get("reason", "")
+        details = request.form.get("details", "").strip()
+        allowed_reasons = {
+            "misleading_listing", "unsafe_behavior", "fraud",
+            "harassment", "other",
+        }
+        if target_type == "spot":
+            try:
+                target = data_store.find_spot(int(target_id))
+            except ValueError:
+                target = None
+            if target is None or not target.is_active or target.is_demo:
+                abort(404)
+            target_id = str(target.spot_id)
+            return_url = url_for("spots")
+        elif target_type == "user":
+            target = data_store.users_db.get(target_id)
+            if target is None or target.username == reporter.username:
+                abort(404)
+            return_url = url_for("spots")
+        else:
+            abort(400, description="Choose a valid report target.")
+        if reason not in allowed_reasons:
+            flash("Choose a report reason.", "error")
+            return redirect(return_url)
+        if not details or len(details) > 1000:
+            flash("Add details of up to 1000 characters.", "error")
+            return redirect(return_url)
+        with booking_lock:
+            duplicate = any(
+                report["reporter"] == reporter.username
+                and report["target_type"] == target_type
+                and report["target_id"] == target_id
+                and report["status"] == "open"
+                for report in data_store.reports
+            )
+            if duplicate:
+                flash("You already have an open report for this target.", "error")
+                return redirect(return_url)
+            data_store.reports.append({
+                "id": max((report["id"] for report in data_store.reports), default=0) + 1,
+                "reporter": reporter.username,
+                "target_type": target_type,
+                "target_id": target_id,
+                "reason": reason,
+                "details": details,
+                "status": "open",
+                "resolution": "",
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            })
+            data_store.log_event(reporter.username + " reported a " + target_type
+                                 + " (" + target_id + ")")
+        flash("Your report was sent to ParkShare moderation.", "success")
+        return redirect(return_url)
+
+    @app.route("/verification/request", methods=["POST"])
+    @login_required
+    def request_host_verification():
+        user = current_user()
+        if user.role != "Host":
+            abort(403)
+        if user.verification_status == "verified":
+            flash("Your host account is already verified.", "success")
+            return redirect(url_for("profile"))
+        note = request.form.get("verification_note", "").strip()
+        if len(note) > 500:
+            flash("Keep the verification note under 500 characters.", "error")
+            return redirect(url_for("profile"))
+        user.verification_status = "pending"
+        user.verification_note = note
+        user.verified_at = None
+        data_store.log_event(user.username + " requested host verification")
+        flash("Verification request sent. Do not include identity-document numbers or images.", "success")
+        return redirect(url_for("profile"))
+
+    @app.route("/payments/razorpay/webhook", methods=["POST"])
+    def razorpay_webhook():
+        if not current_app.config["RAZORPAY_WEBHOOK_SECRET"]:
+            abort(503, description="Payment webhook is not configured.")
+        body = request.get_data(cache=True)
+        signature = request.headers.get("X-Razorpay-Signature", "")
+        if not payment_module.verify_webhook_signature(
+                body, signature, current_app.config["RAZORPAY_WEBHOOK_SECRET"]):
+            abort(400, description="Invalid payment webhook signature.")
+        try:
+            event = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            abort(400, description="Invalid payment webhook payload.")
+        payment = event.get("payload", {}).get("payment", {}).get("entity", {})
+        if event.get("event") != "payment.captured":
+            return "", 200
+        order_id = payment.get("order_id", "")
+        with booking_lock:
+            booking = next((item for item in data_store.bookings_db
+                            if item.payment_order_id == order_id), None)
+            if booking is None:
+                abort(404)
+            if booking.payment_status == "captured" and booking.payment_id == payment.get("id"):
+                return "", 200
+            if (booking.payment_status != "created"
+                    or payment.get("amount") != booking.payment_amount
+                    or payment.get("currency") != "INR"
+                    or payment.get("status") != "captured"):
+                abort(400, description="Captured payment does not match the booking.")
+            spot = data_store.find_spot(booking.spot_id)
+            actor = booking.driver_username if booking.driver_username != "Guest" else (
+                booking.guest_name or "A guest"
+            )
+            complete_checkout(
+                booking, actor, spot, booking.exit_time, booking.billed_hours,
+                booking.final_cost, payment_id=payment.get("id", ""),
+            )
+        return "", 200
 
     @app.route("/host/earnings")
     @role_required("Host")
@@ -980,6 +1415,139 @@ def create_app(test_config=None):
     def activity():
         events = list(reversed(data_store.activity_log[-30:]))
         return render_template("activity.html", events=events)
+
+    @app.route("/admin", methods=["GET", "POST"])
+    @login_required
+    def admin():
+        user = current_user()
+        if user.username.casefold() not in current_app.config["ADMIN_USERNAMES"]:
+            abort(403)
+        if request.method == "POST":
+            action = request.form.get("action", "")
+            username = request.form.get("username", "").strip()
+            reason = request.form.get("reason", "").strip()
+            if action in ("suspend", "unsuspend") and username:
+                if username.casefold() in current_app.config["ADMIN_USERNAMES"]:
+                    abort(400, description="Administrator accounts cannot be moderated here.")
+                try:
+                    if action == "suspend":
+                        auth_module.suspend_user(username, reason)
+                        flash(f"{username} was suspended.", "success")
+                    else:
+                        auth_module.unsuspend_user(username)
+                        flash(f"{username} was reinstated.", "success")
+                except ValueError as error:
+                    flash(str(error), "error")
+            elif action in ("verify", "reject_verification") and username:
+                candidate = data_store.users_db.get(username)
+                if candidate is None or candidate.role != "Host":
+                    abort(404)
+                if candidate.verification_status != "pending":
+                    flash("That verification request is no longer pending.", "error")
+                elif action == "verify":
+                    candidate.verification_status = "verified"
+                    candidate.verified_at = datetime.now()
+                    candidate.verification_note = ""
+                    data_store.log_event(username + " was verified as a host")
+                    flash(username + " is now a verified host.", "success")
+                else:
+                    candidate.verification_status = "rejected"
+                    candidate.verified_at = None
+                    candidate.verification_note = ""
+                    data_store.log_event(username + " host verification was rejected")
+                    flash(username + "'s verification request was rejected.", "success")
+            elif action in ("resolve_report", "action_report"):
+                try:
+                    report_id = int(request.form.get("report_id", ""))
+                except ValueError:
+                    abort(400, description="Invalid report identifier.")
+                report = next((item for item in data_store.reports
+                               if item["id"] == report_id), None)
+                resolution = request.form.get("resolution", "").strip()
+                if report is None:
+                    abort(404)
+                if report["status"] != "open":
+                    flash("That report has already been resolved.", "error")
+                elif not resolution or len(resolution) > 500:
+                    flash("Add a resolution note of up to 500 characters.", "error")
+                else:
+                    if action == "action_report":
+                        if report["target_type"] == "user":
+                            target_user = data_store.users_db.get(report["target_id"])
+                            if target_user is None:
+                                flash("The reported user no longer exists.", "error")
+                                return redirect(url_for("admin"))
+                            if target_user.username.casefold() in current_app.config["ADMIN_USERNAMES"]:
+                                abort(400, description="Administrator accounts cannot be actioned from a report.")
+                            auth_module.suspend_user(target_user.username, resolution)
+                        else:
+                            target_spot = data_store.find_spot(int(report["target_id"]))
+                            if target_spot is None or not target_spot.is_active:
+                                flash("The reported listing is already unavailable.", "error")
+                                return redirect(url_for("admin"))
+                            if data_store.occupied_slots(target_spot.spot_id):
+                                flash("The listing cannot be hidden while it has active reservations.", "error")
+                                return redirect(url_for("admin"))
+                            target_spot.is_active = False
+                            data_store.refresh_availability(target_spot)
+                    report["status"] = "actioned" if action == "action_report" else "resolved"
+                    report["resolution"] = resolution
+                    report["updated_at"] = datetime.now()
+                    data_store.log_event(
+                        user.username + " " + report["status"] + " report #"
+                        + str(report_id)
+                    )
+                    flash("Report updated.", "success")
+            elif action in ("hide_review", "restore_review"):
+                try:
+                    review_id = int(request.form.get("review_id", ""))
+                except ValueError:
+                    abort(400, description="Invalid review identifier.")
+                review = next((item for item in data_store.reviews
+                               if item["id"] == review_id), None)
+                if review is None:
+                    abort(404)
+                review["visible"] = action == "restore_review"
+                data_store.log_event(
+                    user.username + (" hid review #" if action == "hide_review"
+                                     else " restored review #") + str(review_id)
+                )
+                flash("Review moderation updated.", "success")
+            else:
+                abort(400, description="Choose a valid moderation action.")
+            return redirect(url_for("admin"))
+
+        users = []
+        for username, candidate in sorted(data_store.users_db.items()):
+            users.append({
+                "username": username,
+                "role": candidate.role,
+                "full_name": candidate.full_name,
+                "email": candidate.email,
+                "is_suspended": candidate.is_suspended,
+                "suspended_reason": candidate.suspended_reason,
+                "verification_status": candidate.verification_status,
+                "verification_note": candidate.verification_note,
+            })
+        verification_requests = [
+            item for item in users if item["verification_status"] == "pending"
+        ]
+        open_reports = [item for item in data_store.reports if item["status"] == "open"]
+        report_targets = {}
+        for report in open_reports:
+            if report["target_type"] == "spot":
+                spot = data_store.find_spot(int(report["target_id"]))
+                report_targets[report["id"]] = spot.location if spot else "Listing removed"
+            else:
+                report_targets[report["id"]] = report["target_id"]
+        return render_template(
+            "admin.html",
+            users=users,
+            verification_requests=verification_requests,
+            open_reports=open_reports,
+            report_targets=report_targets,
+            reviews=data_store.reviews,
+        )
 
     @app.route("/health")
     def health():
