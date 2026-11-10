@@ -637,6 +637,7 @@ def create_app(test_config=None):
             return redirect(url_for("profile"))
         for spot in data_store.spots_db:
             if spot.host_username == user.username:
+                data_store.remove_spot_favorites(spot.spot_id)
                 spot.is_active = False
                 _delete_photo(getattr(spot, "photo", ""))
                 spot.photo = ""
@@ -659,6 +660,10 @@ def create_app(test_config=None):
         data_store.notifications[:] = [
             item for item in data_store.notifications if item["username"] != user.username
         ]
+        data_store.saved_spots.difference_update(
+            {favorite for favorite in data_store.saved_spots
+             if favorite[0] == user.username}
+        )
         data_store.activity_log[:] = [
             (timestamp, text.replace(user.username, "Deleted user"))
             for timestamp, text in data_store.activity_log
@@ -899,6 +904,10 @@ def create_app(test_config=None):
             vehicle_types=VEHICLE_TYPES,
             active_spot_count=sum(1 for spot in data_store.spots_db if spot.is_active),
             host_reviews=host_reviews,
+            saved_spot_ids={
+                spot_id for username, spot_id in data_store.saved_spots
+                if user and username == user.username
+            },
             filters={"location": request.args.get("location", ""),
                      "max_price": max_price_raw,
                      "covered": covered,
@@ -912,6 +921,37 @@ def create_app(test_config=None):
                      "near_lon": "" if near_longitude is None else format(near_longitude, ".6f"),
                      "radius_km": int(radius_km)},
         )
+
+    @app.route("/favorites")
+    @role_required("Driver")
+    def favorites():
+        username = current_user().username
+        saved = [
+            spot for spot in data_store.spots_db
+            if (username, spot.spot_id) in data_store.saved_spots
+            and spot.is_active and not spot.is_demo
+        ]
+        saved.sort(key=lambda spot: spot.location.casefold())
+        return render_template("favorites.html", spots=saved)
+
+    @app.route("/favorites/<int:spot_id>/toggle", methods=["POST"])
+    @role_required("Driver")
+    def toggle_favorite(spot_id):
+        spot = data_store.find_spot(spot_id)
+        if spot is None or not spot.is_active or spot.is_demo:
+            abort(404)
+        favorite = (current_user().username, spot_id)
+        if favorite in data_store.saved_spots:
+            data_store.saved_spots.remove(favorite)
+            flash("Listing removed from your saved spots.", "success")
+        else:
+            data_store.saved_spots.add(favorite)
+            flash("Listing saved for later.", "success")
+        data_store.persist()
+        destination = request.form.get("return_to")
+        if destination == "favorites":
+            return redirect(url_for("favorites"))
+        return redirect(url_for("spots"))
 
     @app.route("/host/spots", methods=["GET", "POST"])
     @role_required("Host")
@@ -967,6 +1007,7 @@ def create_app(test_config=None):
             flash("A spot with an active vehicle cannot be removed.", "error")
         else:
             spot.is_active = False
+            data_store.remove_spot_favorites(spot_id)
             _delete_photo(getattr(spot, "photo", ""))
             spot.photo = ""
             data_store.log_event(current_user().username + " removed spot #" + str(spot_id))
@@ -1625,6 +1666,7 @@ def create_app(test_config=None):
                                 flash("The listing cannot be hidden while it has active reservations.", "error")
                                 return redirect(url_for("admin"))
                             target_spot.is_active = False
+                            data_store.remove_spot_favorites(target_spot.spot_id)
                             data_store.refresh_availability(target_spot)
                     report["status"] = "actioned" if action == "action_report" else "resolved"
                     report["resolution"] = resolution
