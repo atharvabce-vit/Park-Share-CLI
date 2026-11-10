@@ -16,6 +16,7 @@ notifications = []
 password_reset_tokens = {}
 reviews = []
 reports = []
+saved_spots = set()
 suspended_users = set()
 login_attempts = {}
 current_user = None
@@ -116,6 +117,10 @@ def _connect():
             reason TEXT NOT NULL, details TEXT NOT NULL, status TEXT NOT NULL,
             resolution TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS saved_spots (
+            username TEXT NOT NULL, spot_id INTEGER NOT NULL,
+            PRIMARY KEY (username, spot_id)
         );
         """
     )
@@ -281,6 +286,13 @@ def _load():
                     "FROM reports ORDER BY report_id DESC"
                 )
             ]
+            saved_spots.clear()
+            saved_spots.update(
+                (username, spot_id)
+                for username, spot_id in connection.execute(
+                    "SELECT username, spot_id FROM saved_spots"
+                )
+            )
             _spot_counter = max((spot.spot_id for spot in spots_db), default=0)
             _booking_counter = max((booking.booking_id for booking in bookings_db), default=0)
         finally:
@@ -378,6 +390,11 @@ def persist():
                       item["created_at"].isoformat(), item["updated_at"].isoformat())
                      for item in reports],
                 )
+                connection.execute("DELETE FROM saved_spots")
+                connection.executemany(
+                    "INSERT INTO saved_spots VALUES (?, ?)",
+                    sorted(saved_spots),
+                )
         finally:
             connection.close()
 
@@ -392,6 +409,7 @@ def reset_data():
     password_reset_tokens.clear()
     reviews.clear()
     reports.clear()
+    saved_spots.clear()
 
 
     suspended_users.clear()
@@ -400,6 +418,12 @@ def reset_data():
     _spot_counter = 0
     _booking_counter = 0
     persist()
+
+
+def remove_spot_favorites(spot_id):
+    saved_spots.difference_update(
+        {favorite for favorite in saved_spots if favorite[1] == spot_id}
+    )
 
 
 def next_spot_id():
