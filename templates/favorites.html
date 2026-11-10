@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Saved spots{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><span class="eyebrow">YOUR SHORTLIST</span><h1>Saved parking spots.</h1><p>Keep promising listings handy while you compare options.</p></div>
+  <a class="button ghost" href="{{ url_for('spots') }}">Find parking</a>
+</section>
+{% if spots %}
+<section class="spot-grid">
+  {% for spot in spots %}
+  <article class="spot-card">
+    {% if spot.photo %}<img class="listing-photo" src="{{ url_for('static', filename=spot.photo) }}" alt="Parking at {{ spot.location }}">{% endif %}
+    <div class="spot-body">
+      <div class="spot-title"><h2>{{ spot.location }}</h2><span class="rating">★ {{ spot.average_rating() if spot.average_rating() is not none else "New" }}</span></div>
+      <p>{{ spot.description or "A convenient local parking space." }}</p>
+      <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
+      <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>Host · {{ spot.host_username }}</span></div>
+      <div class="favorite-actions">
+        <a class="button primary small" href="{{ url_for('spots', location=spot.location) }}">View listing</a>
+        <form method="post" action="{{ url_for('toggle_favorite', spot_id=spot.spot_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_to" value="favorites">
+          <button class="button secondary small" type="submit">Remove</button>
+        </form>
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty-state"><span>♡</span><h2>No saved listings yet</h2><p>Save a real host listing from Find parking and it will appear here.</p><a class="button primary" href="{{ url_for('spots') }}">Browse parking</a></section>
+{% endif %}
+{% endblock %}

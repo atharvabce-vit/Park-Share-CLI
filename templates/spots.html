@@ -40,6 +40,12 @@
       {% if not spot.is_demo %}<a class="text-link" href="{{ map_url(spot.location) }}" target="_blank" rel="noopener noreferrer">Open location in OpenStreetMap →</a>{% endif %}
       <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
       <div class="spot-footer"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }}<small> / hour</small></strong><span>{% if spot.is_demo %}Built-in demo host{% else %}Host · {{ spot.host_username }}{% if find_user(spot.host_username) and find_user(spot.host_username).verification_status == "verified" %} · <span class="status-pill ok">Verified host</span>{% endif %}{% endif %}</span></div>
+      {% if signed_in_user and signed_in_user.role == "Driver" and not spot.is_demo %}
+      <form method="post" action="{{ url_for('toggle_favorite', spot_id=spot.spot_id) }}" class="favorite-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="button secondary small" type="submit">{% if spot.spot_id in saved_spot_ids %}Remove saved spot{% else %}Save for later{% endif %}</button>
+      </form>
+      {% endif %}
       {% if not spot.is_demo and host_reviews.get(spot.host_username) %}
       <section class="host-review-preview">
         <small>{{ host_reviews[spot.host_username].average }} / 5 from {{ host_reviews[spot.host_username].ratings|length }} verified booking review{% if host_reviews[spot.host_username].ratings|length != 1 %}s{% endif %}</small>
