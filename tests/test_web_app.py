@@ -79,6 +79,74 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("bad", data_store.users_db)
 
+    def test_driver_can_save_remove_and_reload_favorite_listings(self):
+        host = self.app.test_client()
+        self.register(host, "favorite_host", "Host")
+        host_page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(host_page),
+            "location": "Favorite garage",
+            "price_per_hour": "45",
+            "total_slots": "1",
+            "latitude": "19.0760",
+            "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+
+        driver = self.app.test_client()
+        self.register(driver, "favorite_driver")
+        browse = driver.get("/spots")
+        self.assertIn(b"Save for later", browse.data)
+        saved = driver.post(
+            "/favorites/" + str(spot.spot_id) + "/toggle",
+            data={"csrf_token": self.csrf(browse)},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Listing saved for later", saved.data)
+        self.assertIn(b"Remove saved spot", saved.data)
+        self.assertEqual(
+            data_store.saved_spots, {("favorite_driver", spot.spot_id)}
+        )
+
+        data_store.configure_storage(self.database_path)
+        self.assertEqual(
+            data_store.saved_spots, {("favorite_driver", spot.spot_id)}
+        )
+        favorites = driver.get("/favorites")
+        self.assertEqual(favorites.status_code, 200)
+        self.assertIn(b"Favorite garage", favorites.data)
+
+        favorites_csrf = self.csrf(favorites)
+        removed = driver.post(
+            "/favorites/" + str(spot.spot_id) + "/toggle",
+            data={
+                "csrf_token": favorites_csrf,
+                "return_to": "favorites",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Listing removed from your saved spots", removed.data)
+        self.assertIn(b"No saved listings yet", removed.data)
+        self.assertEqual(data_store.saved_spots, set())
+
+    def test_guests_cannot_save_listings_or_access_favorites(self):
+        self.assertEqual(self.client.get("/favorites").status_code, 302)
+        self.assertEqual(
+            self.client.post("/favorites/1/toggle").status_code, 400
+        )
+        self.assertEqual(data_store.saved_spots, set())
+        host = self.app.test_client()
+        self.register(host, "favorite_host_role", "Host")
+        page = host.get("/spots")
+        self.assertEqual(host.get("/favorites").status_code, 302)
+        response = host.post("/favorites/1/toggle", data={
+            "csrf_token": self.csrf(page),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/dashboard", response.location)
+        self.assertEqual(data_store.saved_spots, set())
+
     def test_guest_can_browse_book_and_manage_a_sample_listing(self):
         self.app = create_app({
             "TESTING": True,
@@ -1048,6 +1116,7 @@ class ParkShareWebTests(unittest.TestCase):
 
     def test_profile_update_notifications_and_account_deletion_require_password(self):
         self.register(self.client, "profile_driver")
+        data_store.saved_spots.add(("profile_driver", 99))
         profile = self.client.get("/profile")
         updated = self.client.post("/profile", data={
             "csrf_token": self.csrf(profile), "full_name": "Updated Driver",
@@ -1072,6 +1141,7 @@ class ParkShareWebTests(unittest.TestCase):
         }, follow_redirects=True)
         self.assertIn(b"Your account has been deleted", deleted.data)
         self.assertNotIn("profile_driver", data_store.users_db)
+        self.assertEqual(data_store.saved_spots, set())
 
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
