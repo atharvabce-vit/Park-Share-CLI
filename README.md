@@ -9,6 +9,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **TomTom parking discovery:** When configured with licensed TomTom access, nearby parking facilities and their provider-reported availability are shown separately from ParkShare host listings. Provider facilities are discovery-only; ParkShare cannot reserve them.
 - **Safer signup:** Password confirmation, password-strength guidance, profile validation, CSRF-protected forms, and hashed passwords.
 - **Find a space:** Select an area on an interactive Leaflet map, search a place name, or optionally use browser location. Filter geo-tagged spaces by 1, 3, 5, 10, 25, or 50 km, time, price, amenities, and vehicle. See map pins, distance, compatible vehicles, and a 0–100 recommendation score.
+- **Save listings:** Signed-in drivers can bookmark real host listings, revisit them from **Saved spots**, and remove them at any time.
 - **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
 - **Host tools:** Pin each parking entrance on the map, add/edit/remove listings, upload JPG/PNG/WebP photos, and see active bookings and earnings/occupancy trends.
 - **Account tools:** Edit your profile, delete your account (after active bookings are resolved), and request a time-limited password-reset link by email.
@@ -36,6 +37,7 @@ TomTom Parking Availability supports India and reports off-street availability r
 - Hosts receive in-app notifications for booking, cancellation, and checkout events. Profile changes and account deletion are available from **Profile**; account deletion requires the current password and no active bookings.
 - Password reset uses single-use links that expire after 30 minutes. Email delivery only works after an SMTP provider is configured below.
 - Host **Earnings** displays all-time revenue, revenue by listing, the last six calendar months of completed earnings, and estimated 30-day occupancy (reserved space-hours divided by the capacity of live listings).
+- Drivers can select **Save for later** on a real listing and open **Saved spots** from the navigation to compare or revisit their shortlist. Saved listings persist across sessions; removed or deleted listings are cleaned up.
 
 ## Run the browser app
 
