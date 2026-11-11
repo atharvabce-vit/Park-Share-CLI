@@ -11,6 +11,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Find a space:** Select an area on an interactive Leaflet map, search a place name, or optionally use browser location. Filter geo-tagged spaces by 1, 3, 5, 10, 25, or 50 km, time, price, amenities, and vehicle. See map pins, distance, compatible vehicles, and a 0–100 recommendation score.
 - **Save listings:** Signed-in drivers can bookmark real host listings, revisit them from **Saved spots**, and remove them at any time.
 - **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
+- **Clear cancellation policy:** Review cancellation timing and refund limitations before booking; the same policy appears with active bookings.
 - **Reschedule requests:** Drivers can ask hosts to change an upcoming unpaid booking; the host must approve, and availability is checked again before the reservation moves.
 - **Host tools:** Pin each parking entrance on the map, add/edit/remove listings, upload JPG/PNG/WebP photos, and see active bookings and earnings/occupancy trends.
 - **Host availability calendar:** Block future date/time ranges for personal use or maintenance; blocked periods are excluded from search and rejected by booking validation.
@@ -38,6 +39,7 @@ TomTom Parking Availability supports India and reports off-street availability r
 - Hosts can block future periods up to one year ahead. A block cannot overlap an active reservation, and blocked periods cannot be booked.
 - Hosts can add up to 1000 characters of arrival instructions to a listing. They are shown only on the booking page visible to the driver or guest who owns that booking; public search and host booking views do not expose them.
 - Guest bookings require a name and vehicle type and can be viewed, cancelled, or checked out only in the browser session that created them. Clearing that session removes access to the guest booking history. Creating an account is recommended for persistent booking history.
+- Reservations can be cancelled without charge before their reserved start time. Cancellation is unavailable after the reservation begins or checkout starts. Payments are collected at checkout; ParkShare does not automatically issue refunds.
 - Checkout uses demo mode until Razorpay is configured; ratings, discounts, and earnings are app features, but ParkShare does not send earnings to hosts.
 - Listing photos are stored locally in `static/uploads` (JPG, PNG, or WebP, maximum 5 MB). Listing coordinates, accounts, ratings, bookings, activity, and notifications are stored in the SQLite database.
 - Hosts receive in-app notifications for booking, cancellation, and checkout events. Profile changes and account deletion are available from **Profile**; account deletion requires the current password and no active bookings.

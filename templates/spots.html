@@ -82,6 +82,10 @@
         {% endif %}
         <button class="button primary" type="submit">Book this spot</button>
       </form>
+      <details class="cancellation-policy">
+        <summary>Cancellation policy</summary>
+        <p>Cancel before the reserved start time at no charge. Cancellation is unavailable once the reservation starts or checkout has begun. ParkShare does not automatically issue refunds.</p>
+      </details>
       {% if not signed_in_user %}<small>Guest bookings are saved in this browser session. Built-in sample listings and bookings are simulations only.</small>{% endif %}
       {% endif %}
     </div>

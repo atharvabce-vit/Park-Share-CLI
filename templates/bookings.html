@@ -58,6 +58,7 @@
         </form>
         {% endif %}
         {% if booking.status == "Active" and booking.payment_status == "unpaid" %}
+        <p class="cancellation-note">Free cancellation is available before the reserved start time. Cancellation is unavailable after it starts or checkout begins; refunds are not automatic.</p>
         <form method="post" action="{{ url_for('cancel_booking', booking_id=booking.booking_id) }}" onsubmit="return confirm('Cancel this active booking?');">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button danger-outline" type="submit">Cancel booking</button>
         </form>

@@ -222,6 +222,32 @@ class ParkShareWebTests(unittest.TestCase):
             "Use the east gate code 4821.",
         )
 
+    def test_cancellation_policy_is_clear_on_search_and_booking_pages(self):
+        host = self.app.test_client()
+        self.register(host, "policy_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Policy garage",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        driver = self.app.test_client()
+        self.register(driver, "policy_driver")
+        spots_page = driver.get("/spots")
+        self.assertIn(b"Cancel before the reserved start time at no charge", spots_page.data)
+        self.assertIn(b"ParkShare does not automatically issue refunds", spots_page.data)
+        response = driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(spots_page),
+            "spot_id": str(data_store.spots_db[0].spot_id),
+            "start_time": (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"),
+            "hours": "1",
+        })
+        self.assertEqual(response.status_code, 302)
+        booking_page = driver.get("/bookings")
+        self.assertIn(b"Free cancellation is available before", booking_page.data)
+        self.assertIn(b"checkout begins", booking_page.data)
+
     def test_hosts_cannot_block_periods_with_reservations_or_other_listings(self):
         host = self.app.test_client()
         self.register(host, "calendar_owner", "Host")
