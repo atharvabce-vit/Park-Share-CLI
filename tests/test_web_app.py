@@ -291,6 +291,66 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(data_store.reschedule_requests[0]["status"], "accepted")
         self.assertIn("accepted", driver.get("/notifications").data.decode().lower())
 
+    def test_saved_spot_alerts_cover_price_changes_and_reopened_availability(self):
+        host = self.app.test_client()
+        self.register(host, "alerts_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Saved alert garage",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        saved_driver = self.app.test_client()
+        self.register(saved_driver, "alerts_saved")
+        page = saved_driver.get("/spots")
+        saved_driver.post(
+            "/favorites/" + str(spot.spot_id) + "/toggle",
+            data={"csrf_token": self.csrf(page)},
+        )
+
+        page = host.get("/host/spots")
+        response = host.post(
+            "/host/spots/" + str(spot.spot_id) + "/edit",
+            data={
+                "csrf_token": self.csrf(page),
+                "location": "Saved alert garage",
+                "description": "",
+                "price_per_hour": "55",
+                "latitude": "19.0760",
+                "longitude": "72.8777",
+                "vehicle_types": ["Car"],
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Listing details updated", response.data)
+        notifications = saved_driver.get("/notifications")
+        self.assertIn(b"price changed for your saved spot", notifications.data)
+        self.assertIn(b"55.00", notifications.data)
+
+        booking_driver = self.app.test_client()
+        self.register(booking_driver, "alerts_booker")
+        start = (datetime.now() + timedelta(days=2)).replace(
+            second=0, microsecond=0
+        )
+        page = booking_driver.get("/spots")
+        booking_driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(page),
+            "spot_id": str(spot.spot_id),
+            "start_time": start.strftime("%Y-%m-%dT%H:%M"),
+            "hours": "1",
+        })
+        booking = data_store.bookings_db[0]
+        page = booking_driver.get("/bookings")
+        response = booking_driver.post(
+            "/bookings/" + str(booking.booking_id) + "/cancel",
+            data={"csrf_token": self.csrf(page)},
+        )
+        self.assertEqual(response.status_code, 302)
+        notifications = saved_driver.get("/notifications")
+        self.assertIn(b"saved parking spot is available", notifications.data)
+
     def test_reschedule_conflicts_are_rechecked_before_acceptance(self):
         host = self.app.test_client()
         self.register(host, "reschedule_conflict_host", "Host")

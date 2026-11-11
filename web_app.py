@@ -223,6 +223,24 @@ def _notify_booking_parties(booking, spot, subject, update):
         _send_email(recipient, subject, details)
 
 
+def _notify_saved_spot(spot, message):
+    recipients = {
+        username for username, spot_id in data_store.saved_spots
+        if spot_id == spot.spot_id and username in data_store.users_db
+    }
+    for username in recipients:
+        data_store.add_notification(username, message)
+
+
+def _notify_saved_spot_availability(spot, start_time, end_time):
+    if data_store.available_slots_for_window(spot, start_time, end_time) > 0:
+        _notify_saved_spot(
+            spot,
+            "A saved parking spot is available for "
+            + start_time.strftime("%d %b %Y, %I:%M %p") + ".",
+        )
+
+
 def send_due_booking_reminders(now=None):
     now = now or datetime.now()
     reminder_cutoff = now + timedelta(hours=24)
@@ -383,6 +401,7 @@ def create_app(test_config=None):
             actor + " completed booking #" + str(booking.booking_id) + ".",
         )
         data_store.persist()
+        _notify_saved_spot_availability(spot, booking.start_time, booking.end_time)
 
     def notify_checkout_completion(booking, spot):
         payment_update = (
@@ -1087,6 +1106,7 @@ def create_app(test_config=None):
         if block is None:
             abort(404)
         data_store.availability_blocks.remove(block)
+        _notify_saved_spot_availability(spot, block["start_time"], block["end_time"])
         data_store.log_event(
             current_user().username + " reopened availability for spot #" + str(spot_id)
         )
@@ -1121,6 +1141,7 @@ def create_app(test_config=None):
             return redirect(url_for("host_spots"))
         spot.location = location
         spot.description = description
+        previous_price = spot.price_per_hour
         spot.price_per_hour = price
         spot.vehicle_types = types
         spot.covered = request.form.get("covered") == "on"
@@ -1130,6 +1151,12 @@ def create_app(test_config=None):
             spot.photo = photo
         spot.latitude = latitude
         spot.longitude = longitude
+        if price != previous_price:
+            _notify_saved_spot(
+                spot,
+                "The price changed for your saved spot at " + spot.location
+                + " (now ₹" + format(price, ".2f") + " per hour).",
+            )
         data_store.log_event(current_user().username + " updated spot #" + str(spot_id))
         flash("Listing details updated.", "success")
         return redirect(url_for("host_spots"))
@@ -1254,6 +1281,8 @@ def create_app(test_config=None):
             if reschedule["status"] != "pending":
                 flash("That reschedule request has already been handled.", "error")
                 return redirect(url_for("bookings"))
+            previous_start = booking.start_time
+            previous_end = booking.end_time
             if booking.status != "Active" or booking.payment_status != "unpaid":
                 reschedule["status"] = "rejected"
             elif action == "accept":
@@ -1276,6 +1305,7 @@ def create_app(test_config=None):
                 booking.slot_number = slot_number
                 booking.reminder_sent_at = None
                 reschedule["status"] = "accepted"
+                _notify_saved_spot_availability(spot, previous_start, previous_end)
             else:
                 reschedule["status"] = "rejected"
             reschedule["updated_at"] = datetime.now()
@@ -1384,6 +1414,7 @@ def create_app(test_config=None):
                 spot.host_username,
                 actor + " cancelled booking #" + str(booking_id) + ".",
             )
+            _notify_saved_spot_availability(spot, booking.start_time, booking.end_time)
             data_store.log_event(actor + " cancelled booking #" + str(booking_id))
         _notify_booking_parties(
             booking, spot, "ParkShare booking cancelled",

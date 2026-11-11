@@ -42,6 +42,7 @@ TomTom Parking Availability supports India and reports off-street availability r
 - Password reset uses single-use links that expire after 30 minutes. Email delivery only works after an SMTP provider is configured below.
 - Host **Earnings** displays all-time revenue, revenue by listing, the last six calendar months of completed earnings, and estimated 30-day occupancy (reserved space-hours divided by the capacity of live listings).
 - Drivers can select **Save for later** on a real listing and open **Saved spots** from the navigation to compare or revisit their shortlist. Saved listings persist across sessions; removed or deleted listings are cleaned up.
+- Drivers who saved a listing receive in-app notifications when its price changes or a cancellation, checkout, reschedule, or calendar update makes a time window available again. Alerts do not guarantee that the space will remain available.
 
 ## Run the browser app
 
