@@ -1157,10 +1157,140 @@ def create_app(test_config=None):
             review["booking_id"] for review in data_store.reviews
             if user and review["reviewer"] == user.username
         }
+        pending_reschedules = {
+            item["booking_id"]: item for item in data_store.reschedule_requests
+            if item["status"] == "pending"
+            and any(booking.booking_id == item["booking_id"] for booking in mine)
+        }
         return render_template(
             "bookings.html", bookings=mine, checkin_allowed=checkin_allowed,
             reviewed_bookings=reviewed_bookings,
+            pending_reschedules=pending_reschedules,
+            now=now,
+            minimum_start=now.strftime("%Y-%m-%dT%H:%M"),
         )
+
+    @app.route("/bookings/<int:booking_id>/reschedule", methods=["POST"])
+    @login_required
+    def request_reschedule(booking_id):
+        user = current_user()
+        if user.role != "Driver":
+            abort(403)
+        try:
+            requested_start = _parse_start_time(request.form.get("start_time", ""))
+            hours = int(request.form.get("hours", ""))
+        except ValueError:
+            flash("Choose a valid new start time and whole-number duration.", "error")
+            return redirect(url_for("bookings"))
+        now = datetime.now()
+        if hours < 1 or hours > 168:
+            flash("Booking duration must be between 1 and 168 hours.", "error")
+            return redirect(url_for("bookings"))
+        if requested_start < now or requested_start > now + timedelta(days=30):
+            flash("Choose a new start time within the next 30 days.", "error")
+            return redirect(url_for("bookings"))
+        with booking_lock:
+            booking = data_store.find_booking(booking_id)
+            if (booking is None or booking.driver_username != user.username
+                    or booking.status != "Active"
+                    or booking.payment_status != "unpaid"
+                    or booking.start_time <= now):
+                abort(404)
+            if any(item["booking_id"] == booking_id and item["status"] == "pending"
+                   for item in data_store.reschedule_requests):
+                flash("A reschedule request is already awaiting the host.", "error")
+                return redirect(url_for("bookings"))
+            end_time = requested_start + timedelta(hours=hours)
+            if (requested_start == booking.start_time and end_time == booking.end_time):
+                flash("Choose a different time or duration.", "error")
+                return redirect(url_for("bookings"))
+            spot = data_store.find_spot(booking.spot_id)
+            request_id = max(
+                (item["id"] for item in data_store.reschedule_requests), default=0
+            ) + 1
+            now = datetime.now()
+            reschedule = {
+                "id": request_id,
+                "booking_id": booking_id,
+                "requested_by": user.username,
+                "start_time": requested_start,
+                "end_time": end_time,
+                "status": "pending",
+                "created_at": now,
+                "updated_at": now,
+            }
+            data_store.reschedule_requests.append(reschedule)
+            data_store.add_notification(
+                spot.host_username,
+                user.username + " requested a new time for booking #" + str(booking_id) + ".",
+            )
+            data_store.persist()
+        flash("Reschedule request sent to the host.", "success")
+        return redirect(url_for("bookings"))
+
+    @app.route(
+        "/bookings/<int:booking_id>/reschedule/<int:request_id>",
+        methods=["POST"],
+    )
+    @login_required
+    def respond_reschedule(booking_id, request_id):
+        user = current_user()
+        if user.role != "Host":
+            abort(403)
+        action = request.form.get("action", "")
+        if action not in ("accept", "reject"):
+            abort(400, description="Choose whether to accept or reject the request.")
+        with booking_lock:
+            booking = data_store.find_booking(booking_id)
+            reschedule = next(
+                (item for item in data_store.reschedule_requests
+                 if item["id"] == request_id and item["booking_id"] == booking_id),
+                None,
+            )
+            spot = data_store.find_spot(booking.spot_id) if booking else None
+            if (booking is None or spot is None or spot.host_username != user.username
+                    or reschedule is None):
+                abort(404)
+            if reschedule["status"] != "pending":
+                flash("That reschedule request has already been handled.", "error")
+                return redirect(url_for("bookings"))
+            if booking.status != "Active" or booking.payment_status != "unpaid":
+                reschedule["status"] = "rejected"
+            elif action == "accept":
+                if reschedule["start_time"] <= datetime.now():
+                    flash("The requested start time has passed; reject this request.", "error")
+                    return redirect(url_for("bookings"))
+                slot_number = data_store.free_slot_for_window(
+                    spot, reschedule["start_time"], reschedule["end_time"],
+                    ignore_booking_id=booking_id,
+                )
+                if slot_number is None:
+                    flash("The requested period is no longer available.", "error")
+                    return redirect(url_for("bookings"))
+                booking.start_time = reschedule["start_time"]
+                booking.end_time = reschedule["end_time"]
+                booking.planned_hours = int(
+                    (booking.end_time - booking.start_time).total_seconds() // 3600
+                )
+                booking.entry_time = booking.start_time
+                booking.slot_number = slot_number
+                booking.reminder_sent_at = None
+                reschedule["status"] = "accepted"
+            else:
+                reschedule["status"] = "rejected"
+            reschedule["updated_at"] = datetime.now()
+            data_store.refresh_availability(spot)
+            data_store.add_notification(
+                booking.driver_username,
+                "Your reschedule request for booking #" + str(booking_id)
+                + " was " + reschedule["status"] + ".",
+            )
+            data_store.log_event(
+                user.username + " " + reschedule["status"] + " reschedule request #"
+                + str(request_id)
+            )
+        flash("Reschedule request " + reschedule["status"] + ".", "success")
+        return redirect(url_for("bookings"))
 
     @app.route("/bookings/create", methods=["POST"])
     def create_booking():

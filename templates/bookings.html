@@ -10,6 +10,36 @@
       <div class="booking-head"><div><span class="step-tag">BOOKING #{{ booking.booking_id }}</span><h2>{{ spot.location }}</h2></div><span class="badge {{ booking.status|lower }}">{{ booking.status }}</span></div>
       <div class="booking-meta"><span>Space #{{ booking.slot_number }}</span><span>{{ booking.planned_hours }} hour{% if booking.planned_hours != 1 %}s{% endif %}</span><span>₹{{ "%.2f"|format(booking.price_per_hour) }} / hour</span><span>{{ (booking.start_time or booking.entry_time).strftime("%d %b %Y, %I:%M %p") }} – {{ booking.end_time.strftime("%I:%M %p") if booking.end_time else "" }}</span></div>
       {% if booking.guest_name %}<p>Guest booking for {{ booking.guest_name }}</p>{% endif %}
+      {% if signed_in_user and signed_in_user.role == "Driver" and booking.driver_username == signed_in_user.username and booking.status == "Active" and booking.payment_status == "unpaid" and booking.start_time > now and booking.booking_id not in pending_reschedules %}
+      <details class="reschedule-details">
+        <summary>Request a different time</summary>
+        <form method="post" action="{{ url_for('request_reschedule', booking_id=booking.booking_id) }}" class="stack-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="field">New start time<input type="datetime-local" name="start_time" min="{{ minimum_start }}" required></label>
+          <label class="field">Duration (hours)<input type="number" name="hours" min="1" max="168" value="{{ booking.planned_hours }}" required></label>
+          <button class="button secondary" type="submit">Send request to host</button>
+        </form>
+      </details>
+      {% elif signed_in_user and booking.booking_id in pending_reschedules %}
+      {% set reschedule = pending_reschedules[booking.booking_id] %}
+      {% if signed_in_user.role == "Host" %}
+      <div class="reschedule-request">
+        <p><strong>{{ reschedule.requested_by }}</strong> requests {{ reschedule.start_time.strftime("%d %b %Y, %I:%M %p") }} – {{ reschedule.end_time.strftime("%I:%M %p") }}.</p>
+        <div class="booking-actions">
+          <form method="post" action="{{ url_for('respond_reschedule', booking_id=booking.booking_id, request_id=reschedule.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="accept">
+            <button class="button primary small" type="submit">Accept new time</button>
+          </form>
+          <form method="post" action="{{ url_for('respond_reschedule', booking_id=booking.booking_id, request_id=reschedule.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="reject">
+            <button class="button danger-outline small" type="submit">Decline</button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">Your request for {{ reschedule.start_time.strftime("%d %b %Y, %I:%M %p") }} is awaiting the host.</p>
+      {% endif %}
+      {% endif %}
       {% if booking.status in ("Active", "Checked In") and (signed_in_user is none or signed_in_user.role == "Driver") %}
       <div class="booking-actions">
         <form method="post" action="{{ url_for('checkout', booking_id=booking.booking_id) }}" class="checkout-form">

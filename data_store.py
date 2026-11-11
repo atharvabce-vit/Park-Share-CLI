@@ -18,6 +18,7 @@ reviews = []
 reports = []
 saved_spots = set()
 availability_blocks = []
+reschedule_requests = []
 suspended_users = set()
 login_attempts = {}
 current_user = None
@@ -128,6 +129,12 @@ def _connect():
             block_id INTEGER PRIMARY KEY, spot_id INTEGER NOT NULL,
             start_time TEXT NOT NULL, end_time TEXT NOT NULL,
             reason TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS reschedule_requests (
+            request_id INTEGER PRIMARY KEY, booking_id INTEGER NOT NULL,
+            requested_by TEXT NOT NULL, start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL, status TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
         """
     )
@@ -309,6 +316,17 @@ def _load():
                     "FROM availability_blocks ORDER BY start_time"
                 )
             ]
+            reschedule_requests[:] = [
+                {"id": row[0], "booking_id": row[1], "requested_by": row[2],
+                 "start_time": _parse_time(row[3]), "end_time": _parse_time(row[4]),
+                 "status": row[5], "created_at": _parse_time(row[6]),
+                 "updated_at": _parse_time(row[7])}
+                for row in connection.execute(
+                    "SELECT request_id, booking_id, requested_by, start_time, end_time, "
+                    "status, created_at, updated_at FROM reschedule_requests "
+                    "ORDER BY request_id"
+                )
+            ]
             _spot_counter = max((spot.spot_id for spot in spots_db), default=0)
             _booking_counter = max((booking.booking_id for booking in bookings_db), default=0)
             _availability_block_counter = max(
@@ -421,6 +439,15 @@ def persist():
                       block["start_time"].isoformat(), block["end_time"].isoformat(),
                       block["reason"]) for block in availability_blocks],
                 )
+                connection.execute("DELETE FROM reschedule_requests")
+                connection.executemany(
+                    "INSERT INTO reschedule_requests VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(item["id"], item["booking_id"], item["requested_by"],
+                      item["start_time"].isoformat(), item["end_time"].isoformat(),
+                      item["status"], item["created_at"].isoformat(),
+                      item["updated_at"].isoformat())
+                     for item in reschedule_requests],
+                )
         finally:
             connection.close()
 
@@ -437,6 +464,7 @@ def reset_data():
     reports.clear()
     saved_spots.clear()
     availability_blocks.clear()
+    reschedule_requests.clear()
 
 
     suspended_users.clear()
@@ -569,10 +597,12 @@ def overlap(booking, start_time, end_time):
     return start < end_time and start_time < end
 
 
-def occupied_slots(spot_id, start_time=None, end_time=None):
+def occupied_slots(spot_id, start_time=None, end_time=None, ignore_booking_id=None):
     used = set()
     for booking in bookings_db:
         if booking.spot_id != spot_id or booking.slot_number is None:
+            continue
+        if booking.booking_id == ignore_booking_id:
             continue
         if start_time is None or end_time is None:
             if booking.status in ("Active", "Checked In"):
@@ -582,10 +612,12 @@ def occupied_slots(spot_id, start_time=None, end_time=None):
     return used
 
 
-def free_slot_for_window(spot, start_time, end_time):
+def free_slot_for_window(spot, start_time, end_time, ignore_booking_id=None):
     if is_blocked(spot.spot_id, start_time, end_time):
         return None
-    used = occupied_slots(spot.spot_id, start_time, end_time)
+    used = occupied_slots(
+        spot.spot_id, start_time, end_time, ignore_booking_id=ignore_booking_id
+    )
     for number in range(1, spot.total_slots + 1):
         if number not in used:
             return number

@@ -11,6 +11,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Find a space:** Select an area on an interactive Leaflet map, search a place name, or optionally use browser location. Filter geo-tagged spaces by 1, 3, 5, 10, 25, or 50 km, time, price, amenities, and vehicle. See map pins, distance, compatible vehicles, and a 0–100 recommendation score.
 - **Save listings:** Signed-in drivers can bookmark real host listings, revisit them from **Saved spots**, and remove them at any time.
 - **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
+- **Reschedule requests:** Drivers can ask hosts to change an upcoming unpaid booking; the host must approve, and availability is checked again before the reservation moves.
 - **Host tools:** Pin each parking entrance on the map, add/edit/remove listings, upload JPG/PNG/WebP photos, and see active bookings and earnings/occupancy trends.
 - **Host availability calendar:** Block future date/time ranges for personal use or maintenance; blocked periods are excluded from search and rejected by booking validation.
 - **Account tools:** Edit your profile, delete your account (after active bookings are resolved), and request a time-limited password-reset link by email.
@@ -32,6 +33,7 @@ TomTom Parking Availability supports India and reports off-street availability r
 ### Bookings, accounts, and host analytics
 
 - Booking search availability is calculated for the selected start time and duration. A slot cannot be double-booked during overlapping reservation windows. A reservation is capped at 168 hours and can start up to 30 days in advance.
+- Drivers can request a new time or duration for an upcoming unpaid reservation. The host approves or declines the request; approved changes are checked against active reservations and host availability blocks.
 - Hosts can block future periods up to one year ahead. A block cannot overlap an active reservation, and blocked periods cannot be booked.
 - Guest bookings require a name and vehicle type and can be viewed, cancelled, or checked out only in the browser session that created them. Clearing that session removes access to the guest booking history. Creating an account is recommended for persistent booking history.
 - Checkout uses demo mode until Razorpay is configured; ratings, discounts, and earnings are app features, but ParkShare does not send earnings to hosts.

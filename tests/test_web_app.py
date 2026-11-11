@@ -231,6 +231,121 @@ class ParkShareWebTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_driver_reschedule_request_requires_host_approval_and_persists(self):
+        host = self.app.test_client()
+        self.register(host, "reschedule_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Reschedule garage",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        driver = self.app.test_client()
+        self.register(driver, "reschedule_driver")
+        original_start = (datetime.now() + timedelta(days=3)).replace(
+            second=0, microsecond=0
+        )
+        page = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(page), "spot_id": str(spot.spot_id),
+            "start_time": original_start.strftime("%Y-%m-%dT%H:%M"),
+            "hours": "2",
+        })
+        booking = data_store.bookings_db[0]
+        requested_start = original_start + timedelta(days=2)
+        page = driver.get("/bookings")
+        response = driver.post(
+            "/bookings/" + str(booking.booking_id) + "/reschedule",
+            data={
+                "csrf_token": self.csrf(page),
+                "start_time": requested_start.strftime("%Y-%m-%dT%H:%M"),
+                "hours": "3",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Reschedule request sent", response.data)
+        self.assertEqual(booking.start_time, original_start)
+        self.assertEqual(data_store.reschedule_requests[0]["status"], "pending")
+        data_store.configure_storage(self.database_path)
+        self.assertEqual(len(data_store.reschedule_requests), 1)
+
+        page = host.get("/bookings")
+        self.assertIn(b"Accept new time", page.data)
+        request_id = data_store.reschedule_requests[0]["id"]
+        response = host.post(
+            "/bookings/" + str(booking.booking_id) + "/reschedule/"
+            + str(request_id),
+            data={
+                "csrf_token": self.csrf(page),
+                "action": "accept",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Reschedule request accepted", response.data)
+        updated_booking = data_store.find_booking(booking.booking_id)
+        self.assertEqual(updated_booking.start_time, requested_start)
+        self.assertEqual(updated_booking.end_time, requested_start + timedelta(hours=3))
+        self.assertEqual(updated_booking.planned_hours, 3)
+        self.assertEqual(data_store.reschedule_requests[0]["status"], "accepted")
+        self.assertIn("accepted", driver.get("/notifications").data.decode().lower())
+
+    def test_reschedule_conflicts_are_rechecked_before_acceptance(self):
+        host = self.app.test_client()
+        self.register(host, "reschedule_conflict_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Reschedule conflict garage",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        first_driver = self.app.test_client()
+        self.register(first_driver, "reschedule_first")
+        original_start = (datetime.now() + timedelta(days=4)).replace(
+            second=0, microsecond=0
+        )
+        page = first_driver.get("/spots")
+        first_driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(page), "spot_id": str(spot.spot_id),
+            "start_time": original_start.strftime("%Y-%m-%dT%H:%M"), "hours": "1",
+        })
+        first_booking = data_store.bookings_db[0]
+        second_driver = self.app.test_client()
+        self.register(second_driver, "reschedule_second")
+        requested_start = original_start + timedelta(days=2)
+        page = second_driver.get("/spots")
+        second_driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(page), "spot_id": str(spot.spot_id),
+            "start_time": requested_start.strftime("%Y-%m-%dT%H:%M"), "hours": "1",
+        })
+        second_booking = data_store.bookings_db[1]
+
+        page = first_driver.get("/bookings")
+        first_driver.post(
+            "/bookings/" + str(first_booking.booking_id) + "/reschedule",
+            data={
+                "csrf_token": self.csrf(page),
+                "start_time": requested_start.strftime("%Y-%m-%dT%H:%M"),
+                "hours": "1",
+            },
+        )
+        reschedule = data_store.reschedule_requests[0]
+        host_page = host.get("/bookings")
+        response = host.post(
+            "/bookings/" + str(first_booking.booking_id) + "/reschedule/"
+            + str(reschedule["id"]),
+            data={"csrf_token": self.csrf(host_page), "action": "accept"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"requested period is no longer available", response.data)
+        self.assertEqual(data_store.find_booking(first_booking.booking_id).start_time,
+                         original_start)
+        self.assertEqual(data_store.find_booking(second_booking.booking_id).start_time,
+                         requested_start)
+
     def test_guests_cannot_save_listings_or_access_favorites(self):
         self.assertEqual(self.client.get("/favorites").status_code, 302)
         self.assertEqual(
