@@ -16,6 +16,11 @@ class User:
         self.verification_status = verification_status or "unverified"
         self.verification_note = verification_note or ""
         self.verified_at = verified_at
+        self.email_preferences = {
+            "booking_updates": True,
+            "booking_reminders": True,
+            "saved_spot_alerts": True,
+        }
 
 
 class ParkingSpot:

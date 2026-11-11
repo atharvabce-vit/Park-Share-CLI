@@ -19,6 +19,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Private parking instructions:** Hosts can add arrival and access details that appear only to the driver on the authorized booking page, never on public listing cards.
 - **Account tools:** Edit your profile, delete your account (after active bookings are resolved), and request a time-limited password-reset link by email.
 - **Notifications:** Hosts receive in-app updates when drivers book, cancel, or complete a stay.
+- **Email preferences:** Choose email categories for booking updates, reminders, and saved-spot alerts; in-app notifications are unaffected.
 - **Activity feed:** Review recent ParkShare events.
 - **CLI remains available:** The browser interface is an addition; the terminal app still starts with `main.py`.
 
@@ -99,6 +100,8 @@ python -m flask --app web_app send-booking-reminders
 ```
 
 Schedule the command to run every 15 minutes using Windows Task Scheduler (or an equivalent scheduler). Configure the same SMTP and database environment variables for the scheduled task as for the app. A successful reminder is recorded in SQLite so later runs do not resend it; failed sends remain eligible for retry. Guest bookings do not have an email address and therefore do not receive email reminders.
+
+Users can manage booking-update, reminder, and saved-spot alert email categories in **Profile**. These preferences affect email only; in-app notifications continue to be recorded.
 
 ### Trust, reviews, and reports
 

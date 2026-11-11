@@ -14,7 +14,13 @@ import zlib
 import auth_module
 import data_store
 from werkzeug.security import check_password_hash
-from web_app import _demo_area_markers, _distance_km, create_app
+from web_app import (
+    _demo_area_markers,
+    _distance_km,
+    _notify_booking_parties,
+    create_app,
+)
+from models import Booking, ParkingSpot
 
 
 class ParkShareWebTests(unittest.TestCase):
@@ -247,6 +253,45 @@ class ParkShareWebTests(unittest.TestCase):
         booking_page = driver.get("/bookings")
         self.assertIn(b"Free cancellation is available before", booking_page.data)
         self.assertIn(b"checkout begins", booking_page.data)
+
+    def test_email_preferences_persist_and_filter_email_only(self):
+        host_client = self.app.test_client()
+        self.register(host_client, "prefs_host", "Host")
+        driver_client = self.app.test_client()
+        self.register(driver_client, "prefs_driver")
+
+        profile = driver_client.get("/profile")
+        self.assertIn(b"Upcoming booking reminders", profile.data)
+        response = driver_client.post(
+            "/profile/email-preferences",
+            data={
+                "csrf_token": self.csrf(profile),
+                "email_preferences": ["booking_reminders", "saved_spot_alerts"],
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"preferences have been saved", response.data)
+        self.assertFalse(
+            data_store.users_db["prefs_driver"].email_preferences["booking_updates"]
+        )
+        self.assertTrue(
+            data_store.users_db["prefs_driver"].email_preferences["booking_reminders"]
+        )
+        data_store.configure_storage(self.database_path)
+        self.assertFalse(
+            data_store.users_db["prefs_driver"].email_preferences["booking_updates"]
+        )
+
+        spot = ParkingSpot(900, "Preferences garage", 45, "prefs_host", 1)
+        booking = Booking(
+            900, 900, "prefs_driver", 1, 45, datetime.now(),
+        )
+        with patch("web_app._send_email") as send_email:
+            _notify_booking_parties(
+                booking, spot, "ParkShare booking confirmed", "Confirmed."
+            )
+        self.assertEqual(send_email.call_count, 1)
+        self.assertEqual(send_email.call_args.args[0], "prefs_host@example.com")
 
     def test_host_can_export_completed_earnings_as_safe_csv(self):
         host = self.app.test_client()

@@ -17,6 +17,18 @@
     <button class="button primary" type="submit">Save profile</button>
   </form>
 </section>
+<section class="form-panel profile-panel">
+  <span class="eyebrow">EMAIL SETTINGS</span>
+  <h2>Email notifications</h2>
+  <p>Choose which ParkShare email updates you receive. In-app notifications remain enabled.</p>
+  <form method="post" action="{{ url_for('update_email_preferences') }}" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% for category, label in email_preference_labels.items() %}
+    <label class="terms-check"><input type="checkbox" name="email_preferences" value="{{ category }}" {% if signed_in_user.email_preferences.get(category, true) %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <button class="button secondary" type="submit">Save email preferences</button>
+  </form>
+</section>
 {% if signed_in_user.role == "Host" %}
 <section class="form-panel profile-panel">
   <span class="eyebrow">HOST TRUST</span>

@@ -29,6 +29,11 @@ from werkzeug.security import generate_password_hash
 
 
 VEHICLE_TYPES = ("Car", "Motorcycle", "SUV", "Van")
+EMAIL_PREFERENCE_LABELS = {
+    "booking_updates": "Booking confirmations, cancellations, check-ins, and checkout",
+    "booking_reminders": "Upcoming booking reminders",
+    "saved_spot_alerts": "Saved spot price and availability alerts",
+}
 booking_lock = threading.RLock()
 reminder_dispatch_lock = threading.Lock()
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
@@ -206,17 +211,17 @@ def _send_email(recipient, subject, body):
     return True
 
 
-def _notify_booking_parties(booking, spot, subject, update):
+def _notify_booking_parties(booking, spot, subject, update, category="booking_updates"):
     recipients = []
     host = data_store.users_db.get(spot.host_username)
     if host and host.email:
-        recipients.append(host.email)
+        recipients.append((host, host.email))
     driver = (
         data_store.users_db.get(booking.driver_username)
         if booking.driver_username != "Guest" else None
     )
     if driver and driver.email:
-        recipients.append(driver.email)
+        recipients.append((driver, driver.email))
     if not recipients:
         return
     details = (
@@ -228,8 +233,12 @@ def _notify_booking_parties(booking, spot, subject, update):
         + "Payment status: " + booking.payment_status + "\n\n"
         + update
     )
-    for recipient in dict.fromkeys(recipients):
-        _send_email(recipient, subject, details)
+    sent_to = set()
+    for recipient, address in recipients:
+        if (recipient.email_preferences.get(category, True)
+                and address not in sent_to):
+            _send_email(address, subject, details)
+            sent_to.add(address)
 
 
 def _notify_saved_spot(spot, message):
@@ -239,6 +248,12 @@ def _notify_saved_spot(spot, message):
     }
     for username in recipients:
         data_store.add_notification(username, message)
+        user = data_store.users_db[username]
+        if user.email and user.email_preferences.get("saved_spot_alerts", True):
+            _send_email(
+                user.email, "ParkShare saved spot update",
+                message + "\n\nListing: " + spot.location,
+            )
 
 
 def _notify_saved_spot_availability(spot, start_time, end_time):
@@ -272,7 +287,8 @@ def send_due_booking_reminders(now=None):
                     if booking.driver_username != "Guest" else None
                 )
                 spot = data_store.find_spot(booking.spot_id)
-                if driver is None or not driver.email or spot is None:
+                if (driver is None or not driver.email or spot is None
+                        or not driver.email_preferences.get("booking_reminders", True)):
                     continue
                 body = (
                     "Your ParkShare reservation starts within the next 24 hours.\n\n"
@@ -647,7 +663,24 @@ def create_app(test_config=None):
                 data_store.log_event(user.username + " updated their profile")
                 flash("Your profile has been updated.", "success")
                 return redirect(url_for("profile"))
-        return render_template("profile.html", vehicle_types=VEHICLE_TYPES)
+        return render_template(
+            "profile.html", vehicle_types=VEHICLE_TYPES,
+            email_preference_labels=EMAIL_PREFERENCE_LABELS,
+        )
+
+    @app.route("/profile/email-preferences", methods=["POST"])
+    @login_required
+    def update_email_preferences():
+        user = current_user()
+        selected = set(request.form.getlist("email_preferences"))
+        if not selected.issubset(EMAIL_PREFERENCE_LABELS):
+            abort(400, description="Choose valid email notification preferences.")
+        user.email_preferences = {
+            category: category in selected for category in EMAIL_PREFERENCE_LABELS
+        }
+        data_store.persist()
+        flash("Your email notification preferences have been saved.", "success")
+        return redirect(url_for("profile"))
 
     @app.route("/account/delete", methods=["POST"])
     @login_required

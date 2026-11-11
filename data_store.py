@@ -126,6 +126,10 @@ def _connect():
             username TEXT NOT NULL, spot_id INTEGER NOT NULL,
             PRIMARY KEY (username, spot_id)
         );
+        CREATE TABLE IF NOT EXISTS email_preferences (
+            username TEXT NOT NULL, category TEXT NOT NULL, enabled INTEGER NOT NULL,
+            PRIMARY KEY (username, category)
+        );
         CREATE TABLE IF NOT EXISTS availability_blocks (
             block_id INTEGER PRIMARY KEY, spot_id INTEGER NOT NULL,
             start_time TEXT NOT NULL, end_time TEXT NOT NULL,
@@ -211,6 +215,11 @@ def _load():
                 users_db[user.username] = user
                 if user.is_suspended:
                     suspended_users.add(user.username)
+            for username, category, enabled in connection.execute(
+                "SELECT username, category, enabled FROM email_preferences"
+            ):
+                if username in users_db and category in users_db[username].email_preferences:
+                    users_db[username].email_preferences[category] = bool(enabled)
 
             spots_db[:] = []
             ratings = {}
@@ -366,6 +375,13 @@ def persist():
                       getattr(user, "verification_note", ""),
                       user.verified_at.isoformat() if getattr(user, "verified_at", None) else None)
                      for user in users_db.values()],
+                )
+                connection.execute("DELETE FROM email_preferences")
+                connection.executemany(
+                    "INSERT INTO email_preferences VALUES (?, ?, ?)",
+                    [(user.username, category, int(enabled))
+                     for user in users_db.values()
+                     for category, enabled in user.email_preferences.items()],
                 )
                 connection.execute("DELETE FROM spots")
                 connection.executemany(
