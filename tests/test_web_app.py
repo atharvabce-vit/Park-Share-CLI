@@ -186,6 +186,42 @@ class ParkShareWebTests(unittest.TestCase):
         spots_page = driver.get("/spots?start_time=" + query_start + "&hours=1")
         self.assertIn(b"Calendar garage", spots_page.data)
 
+    def test_parking_instructions_are_private_to_confirmed_booking_parties(self):
+        host = self.app.test_client()
+        self.register(host, "instructions_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Instructions garage",
+            "description": "Near the station",
+            "parking_instructions": "Use the east gate code 4821.",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        public_search = self.client.get("/spots")
+        self.assertIn(b"Instructions garage", public_search.data)
+        self.assertNotIn(b"east gate code", public_search.data)
+
+        driver = self.app.test_client()
+        self.register(driver, "instructions_driver")
+        page = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(page), "spot_id": str(spot.spot_id),
+            "start_time": (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"),
+            "hours": "1",
+        })
+        booking_page = driver.get("/bookings")
+        self.assertIn(b"Parking instructions from your host", booking_page.data)
+        self.assertIn(b"east gate code 4821", booking_page.data)
+        self.assertNotIn(b"east gate code", host.get("/bookings").data)
+
+        data_store.configure_storage(self.database_path)
+        self.assertEqual(
+            data_store.find_spot(spot.spot_id).parking_instructions,
+            "Use the east gate code 4821.",
+        )
+
     def test_hosts_cannot_block_periods_with_reservations_or_other_listings(self):
         host = self.app.test_client()
         self.register(host, "calendar_owner", "Host")

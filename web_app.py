@@ -1012,6 +1012,13 @@ def create_app(test_config=None):
                 description, request.form.get("covered") == "on",
                 request.form.get("ev_charging") == "on", types, photo, latitude, longitude,
             )
+            spot.parking_instructions = request.form.get(
+                "parking_instructions", ""
+            ).strip()
+            if len(spot.parking_instructions) > 1000:
+                _delete_photo(photo)
+                flash("Keep parking instructions under 1000 characters.", "error")
+                return redirect(url_for("host_spots"))
             data_store.spots_db.append(spot)
             data_store.log_event(user.username + " listed spot #" + str(spot.spot_id) + " at " + location)
             flash("Your parking spot is now live.", "success")
@@ -1121,6 +1128,7 @@ def create_app(test_config=None):
             abort(404)
         location = request.form.get("location", "").strip()
         description = request.form.get("description", "").strip()
+        parking_instructions = request.form.get("parking_instructions", "").strip()
         try:
             price = float(request.form.get("price_per_hour", ""))
             latitude, longitude = _coordinates(
@@ -1130,8 +1138,9 @@ def create_app(test_config=None):
             flash("Enter a valid hourly price and map location.", "error")
             return redirect(url_for("host_spots"))
         types = [item for item in VEHICLE_TYPES if item in request.form.getlist("vehicle_types")]
-        if not location or not math.isfinite(price) or price < 1 or not types:
-            flash("A location, price of at least ₹1, and one vehicle type are required.", "error")
+        if (not location or not math.isfinite(price) or price < 1 or not types
+                or len(parking_instructions) > 1000):
+            flash("Enter a location, valid price, vehicle type, and instructions under 1000 characters.", "error")
             return redirect(url_for("host_spots"))
         upload = request.files.get("photo")
         try:
@@ -1141,6 +1150,7 @@ def create_app(test_config=None):
             return redirect(url_for("host_spots"))
         spot.location = location
         spot.description = description
+        spot.parking_instructions = parking_instructions
         previous_price = spot.price_per_hour
         spot.price_per_hour = price
         spot.vehicle_types = types

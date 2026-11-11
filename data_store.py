@@ -81,7 +81,8 @@ def _connect():
             description TEXT NOT NULL, covered INTEGER NOT NULL, ev_charging INTEGER NOT NULL,
             vehicle_types TEXT NOT NULL, available_slots INTEGER NOT NULL,
             is_active INTEGER NOT NULL, photo TEXT NOT NULL,
-            latitude REAL, longitude REAL, is_demo INTEGER NOT NULL DEFAULT 0
+            latitude REAL, longitude REAL, is_demo INTEGER NOT NULL DEFAULT 0,
+            parking_instructions TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS ratings (
             spot_id INTEGER NOT NULL, rating INTEGER NOT NULL
@@ -147,6 +148,10 @@ def _connect():
         connection.execute("ALTER TABLE spots ADD COLUMN longitude REAL")
     if "is_demo" not in columns:
         connection.execute("ALTER TABLE spots ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")
+    if "parking_instructions" not in columns:
+        connection.execute(
+            "ALTER TABLE spots ADD COLUMN parking_instructions TEXT NOT NULL DEFAULT ''"
+        )
     booking_columns = {row[1] for row in connection.execute("PRAGMA table_info(bookings)")}
     if "start_time" not in booking_columns:
         connection.execute("ALTER TABLE bookings ADD COLUMN start_time TEXT")
@@ -214,7 +219,7 @@ def _load():
             for row in connection.execute(
                 "SELECT spot_id, location, price, host_username, total_slots, description, "
                 "covered, ev_charging, vehicle_types, available_slots, is_active, photo, "
-                "latitude, longitude, is_demo FROM spots"
+                "latitude, longitude, is_demo, parking_instructions FROM spots"
             ):
                 spot = ParkingSpot(
                     row[0], row[1], row[2], row[3], row[4], row[5],
@@ -226,6 +231,7 @@ def _load():
                 spot.latitude = row[12]
                 spot.longitude = row[13]
                 spot.is_demo = bool(row[14])
+                spot.parking_instructions = row[15]
                 spot.ratings = ratings.get(spot.spot_id, [])
                 spots_db.append(spot)
 
@@ -363,12 +369,13 @@ def persist():
                 )
                 connection.execute("DELETE FROM spots")
                 connection.executemany(
-                    "INSERT INTO spots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO spots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(spot.spot_id, spot.location, spot.price_per_hour, spot.host_username,
                       spot.total_slots, spot.description, int(spot.covered), int(spot.ev_charging),
                       json.dumps(spot.vehicle_types), spot.available_slots, int(spot.is_active),
                       getattr(spot, "photo", ""), getattr(spot, "latitude", None),
-                      getattr(spot, "longitude", None), int(getattr(spot, "is_demo", False)))
+                      getattr(spot, "longitude", None), int(getattr(spot, "is_demo", False)),
+                      getattr(spot, "parking_instructions", ""))
                      for spot in spots_db],
                 )
                 connection.execute("DELETE FROM ratings")

@@ -9,6 +9,9 @@
     <article class="booking-card">
       <div class="booking-head"><div><span class="step-tag">BOOKING #{{ booking.booking_id }}</span><h2>{{ spot.location }}</h2></div><span class="badge {{ booking.status|lower }}">{{ booking.status }}</span></div>
       <div class="booking-meta"><span>Space #{{ booking.slot_number }}</span><span>{{ booking.planned_hours }} hour{% if booking.planned_hours != 1 %}s{% endif %}</span><span>₹{{ "%.2f"|format(booking.price_per_hour) }} / hour</span><span>{{ (booking.start_time or booking.entry_time).strftime("%d %b %Y, %I:%M %p") }} – {{ booking.end_time.strftime("%I:%M %p") if booking.end_time else "" }}</span></div>
+      {% if spot.parking_instructions and (signed_in_user is none or (signed_in_user.role == "Driver" and booking.driver_username == signed_in_user.username)) %}
+      <aside class="parking-instructions"><strong>Parking instructions from your host</strong><p>{{ spot.parking_instructions }}</p></aside>
+      {% endif %}
       {% if booking.guest_name %}<p>Guest booking for {{ booking.guest_name }}</p>{% endif %}
       {% if signed_in_user and signed_in_user.role == "Driver" and booking.driver_username == signed_in_user.username and booking.status == "Active" and booking.payment_status == "unpaid" and booking.start_time > now and booking.booking_id not in pending_reschedules %}
       <details class="reschedule-details">
