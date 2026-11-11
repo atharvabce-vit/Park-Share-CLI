@@ -425,8 +425,8 @@ def create_app(test_config=None):
             spot.host_username,
             actor + " completed booking #" + str(booking.booking_id) + ".",
         )
-        data_store.persist()
         _notify_saved_spot_availability(spot, booking.start_time, booking.end_time)
+        data_store.persist()
 
     def notify_checkout_completion(booking, spot):
         payment_update = (
@@ -1122,25 +1122,26 @@ def create_app(test_config=None):
         if len(reason) > 200:
             flash("Keep the block note under 200 characters.", "error")
             return redirect(url_for("host_spots"))
-        if any(data_store.overlap(booking, start_time, end_time)
-               for booking in data_store.bookings_db if booking.spot_id == spot_id):
-            flash("A blocked period cannot overlap an active reservation.", "error")
-            return redirect(url_for("host_spots"))
-        if any(block["spot_id"] == spot_id
-               and block["start_time"] < end_time and start_time < block["end_time"]
-               for block in data_store.availability_blocks):
-            flash("That period overlaps an existing availability block.", "error")
-            return redirect(url_for("host_spots"))
-        data_store.availability_blocks.append({
-            "id": data_store.next_availability_block_id(),
-            "spot_id": spot_id,
-            "start_time": start_time,
-            "end_time": end_time,
-            "reason": reason,
-        })
-        data_store.log_event(
-            current_user().username + " blocked availability for spot #" + str(spot_id)
-        )
+        with booking_lock:
+            if any(data_store.overlap(booking, start_time, end_time)
+                   for booking in data_store.bookings_db if booking.spot_id == spot_id):
+                flash("A blocked period cannot overlap an active reservation.", "error")
+                return redirect(url_for("host_spots"))
+            if any(block["spot_id"] == spot_id
+                   and block["start_time"] < end_time and start_time < block["end_time"]
+                   for block in data_store.availability_blocks):
+                flash("That period overlaps an existing availability block.", "error")
+                return redirect(url_for("host_spots"))
+            data_store.availability_blocks.append({
+                "id": data_store.next_availability_block_id(),
+                "spot_id": spot_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "reason": reason,
+            })
+            data_store.log_event(
+                current_user().username + " blocked availability for spot #" + str(spot_id)
+            )
         flash("The space is blocked for the selected period.", "success")
         return redirect(url_for("host_spots"))
 
