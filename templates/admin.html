@@ -128,4 +128,19 @@
   <p class="muted">No reviews yet.</p>
   {% endfor %}
 </section>
+
+<section class="admin-section">
+  <div class="section-heading"><div><span class="eyebrow">ACCOUNTABILITY</span><h2>Admin audit history</h2></div></div>
+  {% for entry in audit_entries %}
+  <article class="admin-card audit-entry">
+    <div>
+      <strong>{{ entry.action|replace("_", " ")|title }} · {{ entry.target }}</strong>
+      <p>{{ entry.moderator }} · {{ entry.created_at.strftime("%d %b %Y, %I:%M %p") }}</p>
+      {% if entry.details %}<p>{{ entry.details }}</p>{% endif %}
+    </div>
+  </article>
+  {% else %}
+  <p class="muted">No moderation actions have been recorded.</p>
+  {% endfor %}
+</section>
 {% endblock %}

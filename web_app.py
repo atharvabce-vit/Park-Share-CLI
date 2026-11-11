@@ -1945,9 +1945,15 @@ def create_app(test_config=None):
                 try:
                     if action == "suspend":
                         auth_module.suspend_user(username, reason)
+                        data_store.record_admin_action(
+                            user.username, action, username, reason
+                        )
                         flash(f"{username} was suspended.", "success")
                     else:
                         auth_module.unsuspend_user(username)
+                        data_store.record_admin_action(
+                            user.username, action, username
+                        )
                         flash(f"{username} was reinstated.", "success")
                 except ValueError as error:
                     flash(str(error), "error")
@@ -1962,12 +1968,18 @@ def create_app(test_config=None):
                     candidate.verified_at = datetime.now()
                     candidate.verification_note = ""
                     data_store.log_event(username + " was verified as a host")
+                    data_store.record_admin_action(
+                        user.username, action, username
+                    )
                     flash(username + " is now a verified host.", "success")
                 else:
                     candidate.verification_status = "rejected"
                     candidate.verified_at = None
                     candidate.verification_note = ""
                     data_store.log_event(username + " host verification was rejected")
+                    data_store.record_admin_action(
+                        user.username, action, username
+                    )
                     flash(username + "'s verification request was rejected.", "success")
             elif action in ("resolve_report", "action_report"):
                 try:
@@ -2011,6 +2023,11 @@ def create_app(test_config=None):
                         user.username + " " + report["status"] + " report #"
                         + str(report_id)
                     )
+                    data_store.record_admin_action(
+                        user.username, action,
+                        report["target_type"] + ":" + report["target_id"],
+                        resolution,
+                    )
                     flash("Report updated.", "success")
             elif action in ("hide_review", "restore_review"):
                 try:
@@ -2025,6 +2042,10 @@ def create_app(test_config=None):
                 data_store.log_event(
                     user.username + (" hid review #" if action == "hide_review"
                                      else " restored review #") + str(review_id)
+                )
+                data_store.record_admin_action(
+                    user.username, action,
+                    "review #" + str(review_id) + " for " + review["target"],
                 )
                 flash("Review moderation updated.", "success")
             else:
@@ -2061,6 +2082,7 @@ def create_app(test_config=None):
             open_reports=open_reports,
             report_targets=report_targets,
             reviews=data_store.reviews,
+            audit_entries=data_store.admin_audit_log[:100],
         )
 
     @app.route("/health")

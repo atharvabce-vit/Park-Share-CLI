@@ -19,6 +19,7 @@ reports = []
 saved_spots = set()
 availability_blocks = []
 reschedule_requests = []
+admin_audit_log = []
 suspended_users = set()
 login_attempts = {}
 current_user = None
@@ -26,6 +27,7 @@ current_user = None
 _spot_counter = 0
 _booking_counter = 0
 _availability_block_counter = 0
+_admin_audit_counter = 0
 _storage_lock = threading.RLock()
 _database_path = os.environ.get(
     "PARKSHARE_DATABASE",
@@ -130,6 +132,11 @@ def _connect():
             username TEXT NOT NULL, category TEXT NOT NULL, enabled INTEGER NOT NULL,
             PRIMARY KEY (username, category)
         );
+        CREATE TABLE IF NOT EXISTS admin_audit_log (
+            audit_id INTEGER PRIMARY KEY, moderator TEXT NOT NULL,
+            action TEXT NOT NULL, target TEXT NOT NULL,
+            details TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS availability_blocks (
             block_id INTEGER PRIMARY KEY, spot_id INTEGER NOT NULL,
             start_time TEXT NOT NULL, end_time TEXT NOT NULL,
@@ -196,7 +203,8 @@ def _parse_time(value):
 
 
 def _load():
-    global _spot_counter, _booking_counter, _availability_block_counter, current_user
+    global _spot_counter, _booking_counter, _availability_block_counter
+    global _admin_audit_counter, current_user
     with _storage_lock:
         connection = _connect()
         try:
@@ -342,10 +350,22 @@ def _load():
                     "ORDER BY request_id"
                 )
             ]
+            admin_audit_log[:] = [
+                {"id": row[0], "moderator": row[1], "action": row[2],
+                 "target": row[3], "details": row[4],
+                 "created_at": _parse_time(row[5])}
+                for row in connection.execute(
+                    "SELECT audit_id, moderator, action, target, details, created_at "
+                    "FROM admin_audit_log ORDER BY audit_id DESC"
+                )
+            ]
             _spot_counter = max((spot.spot_id for spot in spots_db), default=0)
             _booking_counter = max((booking.booking_id for booking in bookings_db), default=0)
             _availability_block_counter = max(
                 (block["id"] for block in availability_blocks), default=0
+            )
+            _admin_audit_counter = max(
+                (item["id"] for item in admin_audit_log), default=0
             )
         finally:
             connection.close()
@@ -471,12 +491,20 @@ def persist():
                       item["updated_at"].isoformat())
                      for item in reschedule_requests],
                 )
+                connection.execute("DELETE FROM admin_audit_log")
+                connection.executemany(
+                    "INSERT INTO admin_audit_log VALUES (?, ?, ?, ?, ?, ?)",
+                    [(item["id"], item["moderator"], item["action"], item["target"],
+                      item["details"], item["created_at"].isoformat())
+                     for item in admin_audit_log],
+                )
         finally:
             connection.close()
 
 
 def reset_data():
     global _spot_counter, _booking_counter, _availability_block_counter, current_user
+    global _admin_audit_counter
     users_db.clear()
     spots_db[:] = []
     bookings_db[:] = []
@@ -488,6 +516,7 @@ def reset_data():
     saved_spots.clear()
     availability_blocks.clear()
     reschedule_requests.clear()
+    admin_audit_log.clear()
 
 
     suspended_users.clear()
@@ -496,6 +525,7 @@ def reset_data():
     _spot_counter = 0
     _booking_counter = 0
     _availability_block_counter = 0
+    _admin_audit_counter = 0
     persist()
 
 
@@ -518,6 +548,20 @@ def is_blocked(spot_id, start_time, end_time):
         and start_time < block["end_time"]
         for block in availability_blocks
     )
+
+
+def record_admin_action(moderator, action, target, details=""):
+    global _admin_audit_counter
+    _admin_audit_counter += 1
+    admin_audit_log.insert(0, {
+        "id": _admin_audit_counter,
+        "moderator": moderator,
+        "action": action,
+        "target": str(target),
+        "details": details,
+        "created_at": datetime.now(),
+    })
+    persist()
 
 
 def next_spot_id():

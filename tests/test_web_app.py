@@ -293,6 +293,39 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(send_email.call_count, 1)
         self.assertEqual(send_email.call_args.args[0], "prefs_host@example.com")
 
+    def test_admin_moderation_actions_are_audited_and_private(self):
+        self.app = create_app({
+            "TESTING": True,
+            "SECRET_KEY": "test-key",
+            "DEMO_MODE": False,
+            "UPLOAD_FOLDER": os.path.join(self.temp_dir.name, "uploads"),
+            "ADMIN_USERNAMES": ("audit_admin",),
+        })
+        admin = self.app.test_client()
+        self.register(admin, "audit_admin")
+        user = self.app.test_client()
+        self.register(user, "audited_user")
+
+        page = admin.get("/admin")
+        response = admin.post("/admin", data={
+            "csrf_token": self.csrf(page),
+            "action": "suspend",
+            "username": "audited_user",
+            "reason": "Repeated policy violations",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(data_store.admin_audit_log), 1)
+        entry = data_store.admin_audit_log[0]
+        self.assertEqual(entry["moderator"], "audit_admin")
+        self.assertEqual(entry["action"], "suspend")
+        self.assertEqual(entry["target"], "audited_user")
+        self.assertEqual(entry["details"], "Repeated policy violations")
+
+        data_store.configure_storage(self.database_path)
+        self.assertEqual(data_store.admin_audit_log[0]["action"], "suspend")
+        self.assertIn(b"Repeated policy violations", admin.get("/admin").data)
+        self.assertEqual(user.get("/admin").status_code, 403)
+
     def test_host_can_export_completed_earnings_as_safe_csv(self):
         host = self.app.test_client()
         self.register(host, "export_host", "Host")

@@ -21,6 +21,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Notifications:** Hosts receive in-app updates when drivers book, cancel, or complete a stay.
 - **Email preferences:** Choose email categories for booking updates, reminders, and saved-spot alerts; in-app notifications are unaffected.
 - **Activity feed:** Review recent ParkShare events.
+- **Admin audit history:** Administrators can review a timestamped history of moderation actions and their recorded notes.
 - **CLI remains available:** The browser interface is an addition; the terminal app still starts with `main.py`.
 
 ### Map search and recommendations
