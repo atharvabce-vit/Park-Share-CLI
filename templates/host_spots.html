@@ -29,6 +29,29 @@
       <p>{{ spot.description or "No description added yet." }}</p>
       <div class="amenities">{% if spot.covered %}<span>Covered</span>{% endif %}{% if spot.ev_charging %}<span>EV charging</span>{% endif %}{% for kind in spot.vehicle_types %}<span>{{ kind }}</span>{% endfor %}</div>
       <div class="listing-bottom"><strong>₹{{ "%.2f"|format(spot.price_per_hour) }} <small>/ hour</small></strong><span class="rating">★ {{ spot.average_rating() if spot.average_rating() is not none else "New" }}</span></div>
+      <details class="edit-details">
+        <summary>Manage unavailable times</summary>
+        <form method="post" action="{{ url_for('add_availability_block', spot_id=spot.spot_id) }}" class="stack-form edit-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="field-grid">
+            <label class="field">Unavailable from<input type="datetime-local" name="start_time" required></label>
+            <label class="field">Unavailable until<input type="datetime-local" name="end_time" required></label>
+          </div>
+          <label class="field">Note <span class="optional">optional</span><input name="reason" maxlength="200" placeholder="Personal use or maintenance"></label>
+          <button class="button secondary" type="submit">Block these times</button>
+        </form>
+        {% for block in blocks_by_spot[spot.spot_id] %}
+        <div class="availability-block">
+          <div><strong>{{ block.start_time.strftime("%d %b %Y, %I:%M %p") }} – {{ block.end_time.strftime("%d %b %Y, %I:%M %p") }}</strong>{% if block.reason %}<small>{{ block.reason }}</small>{% endif %}</div>
+          <form method="post" action="{{ url_for('remove_availability_block', spot_id=spot.spot_id, block_id=block.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button secondary small" type="submit">Reopen</button>
+          </form>
+        </div>
+        {% else %}
+        <p class="muted">No upcoming unavailable times.</p>
+        {% endfor %}
+      </details>
       <details class="edit-details"><summary>Edit listing details</summary>
         <form method="post" action="{{ url_for('edit_spot', spot_id=spot.spot_id) }}" class="stack-form edit-form" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

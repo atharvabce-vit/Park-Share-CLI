@@ -12,6 +12,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Save listings:** Signed-in drivers can bookmark real host listings, revisit them from **Saved spots**, and remove them at any time.
 - **Manage bookings:** Reserve start/end times with overlap checks, see booking history, cancel an active booking, or check out with an optional promo code and rating.
 - **Host tools:** Pin each parking entrance on the map, add/edit/remove listings, upload JPG/PNG/WebP photos, and see active bookings and earnings/occupancy trends.
+- **Host availability calendar:** Block future date/time ranges for personal use or maintenance; blocked periods are excluded from search and rejected by booking validation.
 - **Account tools:** Edit your profile, delete your account (after active bookings are resolved), and request a time-limited password-reset link by email.
 - **Notifications:** Hosts receive in-app updates when drivers book, cancel, or complete a stay.
 - **Activity feed:** Review recent ParkShare events.
@@ -31,6 +32,7 @@ TomTom Parking Availability supports India and reports off-street availability r
 ### Bookings, accounts, and host analytics
 
 - Booking search availability is calculated for the selected start time and duration. A slot cannot be double-booked during overlapping reservation windows. A reservation is capped at 168 hours and can start up to 30 days in advance.
+- Hosts can block future periods up to one year ahead. A block cannot overlap an active reservation, and blocked periods cannot be booked.
 - Guest bookings require a name and vehicle type and can be viewed, cancelled, or checked out only in the browser session that created them. Clearing that session removes access to the guest booking history. Creating an account is recommended for persistent booking history.
 - Checkout uses demo mode until Razorpay is configured; ratings, discounts, and earnings are app features, but ParkShare does not send earnings to hosts.
 - Listing photos are stored locally in `static/uploads` (JPG, PNG, or WebP, maximum 5 MB). Listing coordinates, accounts, ratings, bookings, activity, and notifications are stored in the SQLite database.

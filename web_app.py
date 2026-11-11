@@ -638,6 +638,10 @@ def create_app(test_config=None):
         for spot in data_store.spots_db:
             if spot.host_username == user.username:
                 data_store.remove_spot_favorites(spot.spot_id)
+                data_store.availability_blocks[:] = [
+                    block for block in data_store.availability_blocks
+                    if block["spot_id"] != spot.spot_id
+                ]
                 spot.is_active = False
                 _delete_photo(getattr(spot, "photo", ""))
                 spot.photo = ""
@@ -995,7 +999,17 @@ def create_app(test_config=None):
             return redirect(url_for("host_spots"))
         mine = [spot for spot in data_store.spots_db
                 if spot.host_username == user.username and spot.is_active]
-        return render_template("host_spots.html", spots=mine, vehicle_types=VEHICLE_TYPES)
+        blocks_by_spot = {
+            spot.spot_id: [
+                block for block in data_store.availability_blocks
+                if block["spot_id"] == spot.spot_id and block["end_time"] > datetime.now()
+            ]
+            for spot in mine
+        }
+        return render_template(
+            "host_spots.html", spots=mine, vehicle_types=VEHICLE_TYPES,
+            blocks_by_spot=blocks_by_spot,
+        )
 
     @app.route("/host/spots/<int:spot_id>/remove", methods=["POST"])
     @role_required("Host")
@@ -1008,10 +1022,75 @@ def create_app(test_config=None):
         else:
             spot.is_active = False
             data_store.remove_spot_favorites(spot_id)
+            data_store.availability_blocks[:] = [
+                block for block in data_store.availability_blocks
+                if block["spot_id"] != spot_id
+            ]
             _delete_photo(getattr(spot, "photo", ""))
             spot.photo = ""
             data_store.log_event(current_user().username + " removed spot #" + str(spot_id))
             flash("The listing has been removed.", "success")
+        return redirect(url_for("host_spots"))
+
+    @app.route("/host/spots/<int:spot_id>/blocks", methods=["POST"])
+    @role_required("Host")
+    def add_availability_block(spot_id):
+        spot = data_store.find_spot(spot_id)
+        if spot is None or spot.host_username != current_user().username or not spot.is_active:
+            abort(404)
+        start_raw = request.form.get("start_time", "").strip()
+        end_raw = request.form.get("end_time", "").strip()
+        reason = request.form.get("reason", "").strip()
+        try:
+            start_time = _parse_start_time(start_raw)
+            end_time = _parse_start_time(end_raw)
+        except ValueError:
+            flash("Choose valid start and end times for the blocked period.", "error")
+            return redirect(url_for("host_spots"))
+        now = datetime.now()
+        if start_time < now or end_time <= start_time or end_time > now + timedelta(days=365):
+            flash("Blocked periods must be in the future and end within one year.", "error")
+            return redirect(url_for("host_spots"))
+        if len(reason) > 200:
+            flash("Keep the block note under 200 characters.", "error")
+            return redirect(url_for("host_spots"))
+        if any(data_store.overlap(booking, start_time, end_time)
+               for booking in data_store.bookings_db if booking.spot_id == spot_id):
+            flash("A blocked period cannot overlap an active reservation.", "error")
+            return redirect(url_for("host_spots"))
+        if any(block["spot_id"] == spot_id
+               and block["start_time"] < end_time and start_time < block["end_time"]
+               for block in data_store.availability_blocks):
+            flash("That period overlaps an existing availability block.", "error")
+            return redirect(url_for("host_spots"))
+        data_store.availability_blocks.append({
+            "id": data_store.next_availability_block_id(),
+            "spot_id": spot_id,
+            "start_time": start_time,
+            "end_time": end_time,
+            "reason": reason,
+        })
+        data_store.log_event(
+            current_user().username + " blocked availability for spot #" + str(spot_id)
+        )
+        flash("The space is blocked for the selected period.", "success")
+        return redirect(url_for("host_spots"))
+
+    @app.route("/host/spots/<int:spot_id>/blocks/<int:block_id>/remove", methods=["POST"])
+    @role_required("Host")
+    def remove_availability_block(spot_id, block_id):
+        spot = data_store.find_spot(spot_id)
+        if spot is None or spot.host_username != current_user().username:
+            abort(404)
+        block = next((item for item in data_store.availability_blocks
+                      if item["id"] == block_id and item["spot_id"] == spot_id), None)
+        if block is None:
+            abort(404)
+        data_store.availability_blocks.remove(block)
+        data_store.log_event(
+            current_user().username + " reopened availability for spot #" + str(spot_id)
+        )
+        flash("Availability reopened for that period.", "success")
         return redirect(url_for("host_spots"))
 
     @app.route("/host/spots/<int:spot_id>/edit", methods=["POST"])

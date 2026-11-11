@@ -17,12 +17,14 @@ password_reset_tokens = {}
 reviews = []
 reports = []
 saved_spots = set()
+availability_blocks = []
 suspended_users = set()
 login_attempts = {}
 current_user = None
 
 _spot_counter = 0
 _booking_counter = 0
+_availability_block_counter = 0
 _storage_lock = threading.RLock()
 _database_path = os.environ.get(
     "PARKSHARE_DATABASE",
@@ -122,6 +124,11 @@ def _connect():
             username TEXT NOT NULL, spot_id INTEGER NOT NULL,
             PRIMARY KEY (username, spot_id)
         );
+        CREATE TABLE IF NOT EXISTS availability_blocks (
+            block_id INTEGER PRIMARY KEY, spot_id INTEGER NOT NULL,
+            start_time TEXT NOT NULL, end_time TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT ''
+        );
         """
     )
     columns = {row[1] for row in connection.execute("PRAGMA table_info(spots)")}
@@ -173,7 +180,7 @@ def _parse_time(value):
 
 
 def _load():
-    global _spot_counter, _booking_counter, current_user
+    global _spot_counter, _booking_counter, _availability_block_counter, current_user
     with _storage_lock:
         connection = _connect()
         try:
@@ -293,8 +300,20 @@ def _load():
                     "SELECT username, spot_id FROM saved_spots"
                 )
             )
+            availability_blocks[:] = [
+                {"id": row[0], "spot_id": row[1],
+                 "start_time": _parse_time(row[2]), "end_time": _parse_time(row[3]),
+                 "reason": row[4]}
+                for row in connection.execute(
+                    "SELECT block_id, spot_id, start_time, end_time, reason "
+                    "FROM availability_blocks ORDER BY start_time"
+                )
+            ]
             _spot_counter = max((spot.spot_id for spot in spots_db), default=0)
             _booking_counter = max((booking.booking_id for booking in bookings_db), default=0)
+            _availability_block_counter = max(
+                (block["id"] for block in availability_blocks), default=0
+            )
         finally:
             connection.close()
 
@@ -395,12 +414,19 @@ def persist():
                     "INSERT INTO saved_spots VALUES (?, ?)",
                     sorted(saved_spots),
                 )
+                connection.execute("DELETE FROM availability_blocks")
+                connection.executemany(
+                    "INSERT INTO availability_blocks VALUES (?, ?, ?, ?, ?)",
+                    [(block["id"], block["spot_id"],
+                      block["start_time"].isoformat(), block["end_time"].isoformat(),
+                      block["reason"]) for block in availability_blocks],
+                )
         finally:
             connection.close()
 
 
 def reset_data():
-    global _spot_counter, _booking_counter, current_user
+    global _spot_counter, _booking_counter, _availability_block_counter, current_user
     users_db.clear()
     spots_db[:] = []
     bookings_db[:] = []
@@ -410,6 +436,7 @@ def reset_data():
     reviews.clear()
     reports.clear()
     saved_spots.clear()
+    availability_blocks.clear()
 
 
     suspended_users.clear()
@@ -417,12 +444,28 @@ def reset_data():
     current_user = None
     _spot_counter = 0
     _booking_counter = 0
+    _availability_block_counter = 0
     persist()
 
 
 def remove_spot_favorites(spot_id):
     saved_spots.difference_update(
         {favorite for favorite in saved_spots if favorite[1] == spot_id}
+    )
+
+
+def next_availability_block_id():
+    global _availability_block_counter
+    _availability_block_counter += 1
+    return _availability_block_counter
+
+
+def is_blocked(spot_id, start_time, end_time):
+    return any(
+        block["spot_id"] == spot_id
+        and block["start_time"] < end_time
+        and start_time < block["end_time"]
+        for block in availability_blocks
     )
 
 
@@ -540,6 +583,8 @@ def occupied_slots(spot_id, start_time=None, end_time=None):
 
 
 def free_slot_for_window(spot, start_time, end_time):
+    if is_blocked(spot.spot_id, start_time, end_time):
+        return None
     used = occupied_slots(spot.spot_id, start_time, end_time)
     for number in range(1, spot.total_slots + 1):
         if number not in used:
@@ -554,6 +599,8 @@ def next_free_slot(spot, start_time=None, end_time=None):
 
 
 def available_slots_for_window(spot, start_time, end_time):
+    if is_blocked(spot.spot_id, start_time, end_time):
+        return 0
     return max(0, spot.total_slots - len(occupied_slots(spot.spot_id, start_time, end_time)))
 
 

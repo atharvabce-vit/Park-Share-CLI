@@ -130,6 +130,107 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIn(b"No saved listings yet", removed.data)
         self.assertEqual(data_store.saved_spots, set())
 
+    def test_host_blocks_and_reopens_listing_availability(self):
+        host = self.app.test_client()
+        self.register(host, "calendar_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Calendar garage",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        start = datetime.now() + timedelta(days=2)
+        end = start + timedelta(hours=2)
+        host_page = host.get("/host/spots")
+        response = host.post(
+            "/host/spots/" + str(spot.spot_id) + "/blocks",
+            data={
+                "csrf_token": self.csrf(host_page),
+                "start_time": start.strftime("%Y-%m-%dT%H:%M"),
+                "end_time": end.strftime("%Y-%m-%dT%H:%M"),
+                "reason": "Personal use",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"space is blocked", response.data)
+        self.assertEqual(len(data_store.availability_blocks), 1)
+
+        data_store.configure_storage(self.database_path)
+        self.assertEqual(len(data_store.availability_blocks), 1)
+        driver = self.app.test_client()
+        self.register(driver, "calendar_driver")
+        query_start = start.strftime("%Y-%m-%dT%H:%M")
+        spots_page = driver.get("/spots?start_time=" + query_start + "&hours=1")
+        self.assertIn(b"No spots match those filters", spots_page.data)
+        booking = driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(spots_page),
+            "spot_id": str(spot.spot_id),
+            "start_time": query_start,
+            "hours": "1",
+        }, follow_redirects=True)
+        self.assertIn(b"No space is available", booking.data)
+        self.assertEqual(data_store.bookings_db, [])
+
+        host_page = host.get("/host/spots")
+        block_id = data_store.availability_blocks[0]["id"]
+        response = host.post(
+            "/host/spots/" + str(spot.spot_id) + "/blocks/"
+            + str(block_id) + "/remove",
+            data={"csrf_token": self.csrf(host_page)},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Availability reopened", response.data)
+        self.assertEqual(data_store.availability_blocks, [])
+        spots_page = driver.get("/spots?start_time=" + query_start + "&hours=1")
+        self.assertIn(b"Calendar garage", spots_page.data)
+
+    def test_hosts_cannot_block_periods_with_reservations_or_other_listings(self):
+        host = self.app.test_client()
+        self.register(host, "calendar_owner", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Booked calendar garage",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        driver = self.app.test_client()
+        self.register(driver, "calendar_booker")
+        start = datetime.now() + timedelta(days=3)
+        page = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(page), "spot_id": str(spot.spot_id),
+            "start_time": start.strftime("%Y-%m-%dT%H:%M"), "hours": "2",
+        })
+
+        host_page = host.get("/host/spots")
+        response = host.post(
+            "/host/spots/" + str(spot.spot_id) + "/blocks",
+            data={
+                "csrf_token": self.csrf(host_page),
+                "start_time": start.strftime("%Y-%m-%dT%H:%M"),
+                "end_time": (start + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"),
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"cannot overlap an active reservation", response.data)
+        self.assertEqual(data_store.availability_blocks, [])
+
+        other_host = self.app.test_client()
+        self.register(other_host, "calendar_other", "Host")
+        response = other_host.post(
+            "/host/spots/" + str(spot.spot_id) + "/blocks",
+            data={
+                "csrf_token": self.csrf(other_host.get("/host/spots")),
+                "start_time": start.strftime("%Y-%m-%dT%H:%M"),
+                "end_time": (start + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"),
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_guests_cannot_save_listings_or_access_favorites(self):
         self.assertEqual(self.client.get("/favorites").status_code, 302)
         self.assertEqual(
