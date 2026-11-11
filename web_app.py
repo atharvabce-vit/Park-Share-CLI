@@ -1,5 +1,7 @@
+import csv
 import hmac
 import hashlib
+import io
 import json
 import math
 import os
@@ -15,7 +17,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import click
-from flask import Flask, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 
 import auth_module
 import billing_module
@@ -79,6 +81,13 @@ def _distance_km(latitude, longitude, other_latitude, other_longitude):
              + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2)
     value = min(1.0, max(0.0, value))
     return earth_radius_km * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+
+
+def _csv_cell(value):
+    text = str(value)
+    if text.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + text
+    return text
 
 
 def _demo_area_markers(latitude, longitude, radius_km):
@@ -1836,6 +1845,50 @@ def create_app(test_config=None):
                                completed_count=completed_count,
                                month_labels=month_labels, monthly_earnings=monthly_earnings,
                                occupancy=occupancy)
+
+    @app.route("/host/earnings/export.csv")
+    @role_required("Host")
+    def export_earnings():
+        host_username = current_user().username
+        rows = []
+        for booking in data_store.bookings_db:
+            spot = data_store.find_spot(booking.spot_id)
+            if spot is None or spot.host_username != host_username or booking.status != "Completed":
+                continue
+            driver = data_store.users_db.get(booking.driver_username)
+            driver_name = booking.guest_name or (
+                driver.full_name if driver else booking.driver_username
+            )
+            rows.append((
+                booking.booking_id,
+                spot.spot_id,
+                spot.location,
+                driver_name,
+                booking.start_time.isoformat() if booking.start_time else "",
+                booking.exit_time.isoformat() if booking.exit_time else "",
+                booking.billed_hours or 0,
+                booking.final_cost or 0,
+                booking.payment_status,
+            ))
+        output = io.StringIO(newline="")
+        writer = csv.writer(output)
+        writer.writerow((
+            "Booking ID", "Spot ID", "Location", "Driver",
+            "Reserved start", "Checkout time", "Billed hours",
+            "Final cost INR", "Payment status",
+        ))
+        for row in rows:
+            writer.writerow(
+                [_csv_cell(value) for value in row]
+            )
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="parkshare-earnings.csv"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.route("/activity")
     @login_required

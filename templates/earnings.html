@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Host earnings{% endblock %}
 {% block content %}
-<section class="page-heading"><div><span class="eyebrow">HOST OVERVIEW</span><h1>Your earnings.</h1><p>Completed stays and revenue from your spaces.</p></div></section>
+<section class="page-heading"><div><span class="eyebrow">HOST OVERVIEW</span><h1>Your earnings.</h1><p>Completed stays and revenue from your spaces.</p></div><a class="button secondary" href="{{ url_for('export_earnings') }}">Download CSV</a></section>
 <section class="earnings-hero"><div><span>ALL-TIME EARNINGS</span><strong>₹{{ "%.2f"|format(total) }}</strong><small>{{ completed_count }} completed booking{% if completed_count != 1 %}s{% endif %}</small></div><span class="earnings-symbol">₹</span></section>
 <section class="stats-grid analytics-grid">
   <article class="stat-card"><span>30-day occupancy</span><strong>{{ occupancy }}%</strong><small>Based on your active listings' available space-hours</small></article>

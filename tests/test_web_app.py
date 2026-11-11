@@ -248,6 +248,49 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIn(b"Free cancellation is available before", booking_page.data)
         self.assertIn(b"checkout begins", booking_page.data)
 
+    def test_host_can_export_completed_earnings_as_safe_csv(self):
+        host = self.app.test_client()
+        self.register(host, "export_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Export garage",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        driver = self.app.test_client()
+        self.register(driver, "export_driver")
+        page = driver.get("/spots")
+        driver.post("/bookings/create", data={
+            "csrf_token": self.csrf(page), "spot_id": str(spot.spot_id),
+            "start_time": (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+            "hours": "1",
+        })
+        booking = data_store.bookings_db[0]
+        booking.start_time = datetime.now() - timedelta(hours=2)
+        booking.end_time = datetime.now() - timedelta(hours=1)
+        booking.entry_time = booking.start_time
+        booking.status = "Checked In"
+        page = driver.get("/bookings")
+        response = driver.post(
+            "/bookings/" + str(booking.booking_id) + "/checkout",
+            data={"csrf_token": self.csrf(page)},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        spot.location = "=SUM(1,1)"
+        export = host.get("/host/earnings/export.csv")
+        self.assertEqual(export.status_code, 200)
+        self.assertTrue(export.mimetype.startswith("text/csv"))
+        self.assertIn("attachment;", export.headers["Content-Disposition"])
+        self.assertIn(b"Booking ID,Spot ID,Location,Driver", export.data)
+        self.assertIn(b"'=SUM(1,1)", export.data)
+        self.assertIn(b"Completed", host.get("/host/earnings").data)
+        self.assertEqual(
+            driver.get("/host/earnings/export.csv").status_code, 302
+        )
+
     def test_hosts_cannot_block_periods_with_reservations_or_other_listings(self):
         host = self.app.test_client()
         self.register(host, "calendar_owner", "Host")

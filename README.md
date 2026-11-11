@@ -14,6 +14,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Clear cancellation policy:** Review cancellation timing and refund limitations before booking; the same policy appears with active bookings.
 - **Reschedule requests:** Drivers can ask hosts to change an upcoming unpaid booking; the host must approve, and availability is checked again before the reservation moves.
 - **Host tools:** Pin each parking entrance on the map, add/edit/remove listings, upload JPG/PNG/WebP photos, and see active bookings and earnings/occupancy trends.
+- **Earnings export:** Hosts can download a CSV of their completed bookings, with spreadsheet-safe text fields.
 - **Host availability calendar:** Block future date/time ranges for personal use or maintenance; blocked periods are excluded from search and rejected by booking validation.
 - **Private parking instructions:** Hosts can add arrival and access details that appear only to the driver on the authorized booking page, never on public listing cards.
 - **Account tools:** Edit your profile, delete your account (after active bookings are resolved), and request a time-limited password-reset link by email.
@@ -45,6 +46,7 @@ TomTom Parking Availability supports India and reports off-street availability r
 - Hosts receive in-app notifications for booking, cancellation, and checkout events. Profile changes and account deletion are available from **Profile**; account deletion requires the current password and no active bookings.
 - Password reset uses single-use links that expire after 30 minutes. Email delivery only works after an SMTP provider is configured below.
 - Host **Earnings** displays all-time revenue, revenue by listing, the last six calendar months of completed earnings, and estimated 30-day occupancy (reserved space-hours divided by the capacity of live listings).
+- Hosts can download their completed booking and revenue rows as a CSV from **Earnings**. The export is limited to the signed-in host's listings.
 - Drivers can select **Save for later** on a real listing and open **Saved spots** from the navigation to compare or revisit their shortlist. Saved listings persist across sessions; removed or deleted listings are cleaned up.
 - Drivers who saved a listing receive in-app notifications when its price changes or a cancellation, checkout, reschedule, or calendar update makes a time window available again. Alerts do not guarantee that the space will remain available.
 
