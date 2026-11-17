@@ -832,6 +832,7 @@ def create_app(test_config=None):
         user = current_user()
         keyword = request.args.get("location", "").strip().lower()
         max_price_raw = request.args.get("max_price", "").strip()
+        min_price_raw = request.args.get("min_price", "").strip()
         covered = request.args.get("covered") == "1"
         ev_charging = request.args.get("ev_charging") == "1"
         requested_vehicle = request.args.get("vehicle_type")
@@ -887,6 +888,20 @@ def create_app(test_config=None):
             except ValueError:
                 flash("Maximum price must be a positive number.", "error")
                 max_price_raw = ""
+        min_price = None
+        if min_price_raw:
+            try:
+                min_price = float(min_price_raw)
+                if not math.isfinite(min_price) or min_price < 0:
+                    raise ValueError()
+            except ValueError:
+                flash("Minimum price must be a positive number.", "error")
+                min_price_raw = ""
+                min_price = None
+        if min_price is not None and max_price is not None and min_price > max_price:
+            flash("Minimum price cannot be higher than maximum price.", "error")
+            min_price_raw = ""
+            min_price = None
 
         results = []
         if near_latitude is not None:
@@ -912,6 +927,8 @@ def create_app(test_config=None):
             elif spot.latitude is not None and spot.longitude is not None:
                 distances[spot.spot_id] = None
             if max_price is not None and spot.price_per_hour > max_price:
+                continue
+            if min_price is not None and spot.price_per_hour < min_price:
                 continue
             if covered and not spot.covered:
                 continue
@@ -1019,6 +1036,7 @@ def create_app(test_config=None):
             },
             filters={"location": request.args.get("location", ""),
                      "max_price": max_price_raw,
+                     "min_price": min_price_raw,
                      "covered": covered,
                      "ev_charging": ev_charging,
                      "vehicle_type": vehicle_type,

@@ -1697,6 +1697,23 @@ class ParkShareWebTests(unittest.TestCase):
             404,
         )
 
+    def test_spot_search_supports_minimum_price_filter(self):
+        host = self.app.test_client()
+        self.register(host, "price_filter_host", "Host")
+        page = host.get("/host/spots")
+        for location, price in (("Budget parking", "20"), ("Premium parking", "80")):
+            host.post("/host/spots", data={
+                "csrf_token": self.csrf(page), "location": location,
+                "price_per_hour": price, "total_slots": "1",
+                "latitude": "19.0760", "longitude": "72.8777",
+                "vehicle_types": ["Car"],
+            })
+            page = host.get("/host/spots")
+        response = self.client.get("/spots?min_price=50")
+        self.assertIn(b"Premium parking", response.data)
+        self.assertNotIn(b"Budget parking", response.data)
+        self.assertIn(b'value="50"', response.data)
+
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
         captured = []
