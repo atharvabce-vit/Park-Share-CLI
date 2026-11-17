@@ -849,6 +849,7 @@ def create_app(test_config=None):
         keyword = request.args.get("location", "").strip().lower()
         max_price_raw = request.args.get("max_price", "").strip()
         min_price_raw = request.args.get("min_price", "").strip()
+        minimum_rating_raw = request.args.get("minimum_rating", "").strip()
         covered = request.args.get("covered") == "1"
         ev_charging = request.args.get("ev_charging") == "1"
         requested_vehicle = request.args.get("vehicle_type")
@@ -920,6 +921,16 @@ def create_app(test_config=None):
             flash("Minimum price cannot be higher than maximum price.", "error")
             min_price_raw = ""
             min_price = None
+        minimum_rating = None
+        if minimum_rating_raw:
+            try:
+                minimum_rating = float(minimum_rating_raw)
+                if not math.isfinite(minimum_rating) or minimum_rating not in (3, 4, 5):
+                    raise ValueError()
+            except ValueError:
+                flash("Choose a minimum rating of 3, 4, or 5 stars.", "error")
+                minimum_rating_raw = ""
+                minimum_rating = None
 
         results = []
         if near_latitude is not None:
@@ -952,6 +963,10 @@ def create_app(test_config=None):
             if covered and not spot.covered:
                 continue
             if ev_charging and not spot.ev_charging:
+                continue
+            if (minimum_rating is not None
+                    and (spot.average_rating() is None
+                         or spot.average_rating() < minimum_rating)):
                 continue
             results.append(spot)
         lowest_price = min((spot.price_per_hour for spot in results), default=0)
@@ -1064,6 +1079,7 @@ def create_app(test_config=None):
             filters={"location": request.args.get("location", ""),
                      "max_price": max_price_raw,
                      "min_price": min_price_raw,
+                     "minimum_rating": minimum_rating_raw,
                      "covered": covered,
                      "ev_charging": ev_charging,
                      "vehicle_type": vehicle_type,

@@ -1796,6 +1796,23 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIn(b"Central parking", response.data)
         self.assertIn(b"Covered space with an EV charger", response.data)
 
+    def test_spot_search_can_filter_by_minimum_rating(self):
+        high_rated = ParkingSpot(
+            1, "Highly rated", 45, "host", 1,
+            latitude=19.076, longitude=72.8777,
+        )
+        high_rated.add_rating(5)
+        low_rated = ParkingSpot(
+            2, "Lower rated", 40, "host", 1,
+            latitude=19.076, longitude=72.8777,
+        )
+        low_rated.add_rating(3)
+        data_store.spots_db.extend([high_rated, low_rated])
+        response = self.client.get("/spots?minimum_rating=4")
+        self.assertIn(b"Highly rated", response.data)
+        self.assertNotIn(b"Lower rated", response.data)
+        self.assertIn(b">4+ stars</option>", response.data)
+
     def test_invalid_spot_sort_falls_back_to_recommended(self):
         response = self.client.get("/spots?sort=unknown")
         self.assertEqual(response.status_code, 200)
