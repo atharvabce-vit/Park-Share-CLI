@@ -10,7 +10,7 @@ import secrets
 import smtplib
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
@@ -93,6 +93,12 @@ def _csv_cell(value):
     if text.startswith(("=", "+", "-", "@", "\t", "\r")):
         return "'" + text
     return text
+
+
+def _ical_text(value):
+    return str(value).replace("\\", "\\\\").replace("\r\n", "\\n").replace(
+        "\n", "\\n"
+    ).replace(",", "\\,").replace(";", "\\;")
 
 
 def _demo_area_markers(latitude, longitude, radius_km):
@@ -1701,6 +1707,41 @@ def create_app(test_config=None):
             customer=customer,
             host_name=(host.full_name or host.username) if host else spot.host_username,
         )
+
+    @app.route("/bookings/<int:booking_id>/calendar.ics")
+    def booking_calendar(booking_id):
+        booking = data_store.find_booking(booking_id)
+        if booking is None:
+            abort(404)
+        if not owns_booking(booking):
+            abort(404)
+        spot = data_store.find_spot(booking.spot_id)
+        if spot is None:
+            abort(404)
+        start_time = booking.start_time or booking.entry_time
+        end_time = booking.end_time
+        event = "\r\n".join((
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//ParkShare//Parking Booking//EN",
+            "CALSCALE:GREGORIAN",
+            "BEGIN:VEVENT",
+            "UID:parkshare-booking-" + str(booking.booking_id) + "@parkshare",
+            "DTSTAMP:" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+            "DTSTART:" + start_time.strftime("%Y%m%dT%H%M%S"),
+            "DTEND:" + end_time.strftime("%Y%m%dT%H%M%S"),
+            "SUMMARY:" + _ical_text("ParkShare parking - " + spot.location),
+            "LOCATION:" + _ical_text(spot.location),
+            "DESCRIPTION:" + _ical_text("Booking #" + str(booking.booking_id)),
+            "END:VEVENT",
+            "END:VCALENDAR",
+            "",
+        ))
+        response = Response(event, mimetype="text/calendar; charset=utf-8")
+        response.headers["Content-Disposition"] = (
+            "attachment; filename=parkshare-booking-" + str(booking.booking_id) + ".ics"
+        )
+        return response
 
     @app.route("/bookings/<int:booking_id>/reviews", methods=["POST"])
     @login_required

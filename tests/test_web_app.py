@@ -1661,6 +1661,42 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIsNone(auth_module.authenticate("password_change_driver", "securepass1"))
         self.assertNotIn("old-token-hash", data_store.password_reset_tokens)
 
+    def test_booking_calendar_download_is_private_to_booking_owner(self):
+        host = self.app.test_client()
+        self.register(host, "calendar_download_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Calendar garage, level 2",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        self.register(self.client, "calendar_download_driver")
+        search = self.client.get("/spots")
+        response = self.client.post("/bookings/create", data={
+            "csrf_token": self.csrf(search), "spot_id": str(spot.spot_id),
+            "hours": "2",
+        })
+        booking = data_store.bookings_db[0]
+        calendar = self.client.get(
+            "/bookings/" + str(booking.booking_id) + "/calendar.ics"
+        )
+        self.assertEqual(calendar.status_code, 200)
+        self.assertIn(b"BEGIN:VCALENDAR", calendar.data)
+        self.assertIn(b"SUMMARY:ParkShare parking - Calendar garage\\, level 2", calendar.data)
+        self.assertIn(
+            "attachment; filename=parkshare-booking-",
+            calendar.headers["Content-Disposition"],
+        )
+
+        other = self.app.test_client()
+        self.register(other, "calendar_download_other")
+        self.assertEqual(
+            other.get("/bookings/" + str(booking.booking_id) + "/calendar.ics").status_code,
+            404,
+        )
+
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
         captured = []
