@@ -788,8 +788,18 @@ def create_app(test_config=None):
         user = current_user()
         mine = [item for item in data_store.notifications if item["username"] == user.username]
         unread_count = sum(1 for item in mine if not item["read"])
+        notification_filter = request.args.get("filter", "all")
+        if notification_filter not in ("all", "unread", "read"):
+            notification_filter = "all"
+        visible = [
+            item for item in mine
+            if notification_filter == "all"
+            or (notification_filter == "unread" and not item["read"])
+            or (notification_filter == "read" and item["read"])
+        ]
         return render_template(
-            "notifications.html", notifications=mine, unread_count=unread_count
+            "notifications.html", notifications=visible, unread_count=unread_count,
+            notification_filter=notification_filter,
         )
 
     @app.route("/notifications/read-all", methods=["POST"])

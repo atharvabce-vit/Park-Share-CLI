@@ -10,6 +10,11 @@
   </form>
   {% endif %}
 </section>
+<nav class="filter-options" aria-label="Filter notifications">
+  <a class="button {% if notification_filter == 'all' %}primary{% else %}ghost{% endif %}" href="{{ url_for('notifications_page', filter='all') }}">All</a>
+  <a class="button {% if notification_filter == 'unread' %}primary{% else %}ghost{% endif %}" href="{{ url_for('notifications_page', filter='unread') }}">Unread</a>
+  <a class="button {% if notification_filter == 'read' %}primary{% else %}ghost{% endif %}" href="{{ url_for('notifications_page', filter='read') }}">Read</a>
+</nav>
 <section class="simple-list">
   {% for item in notifications %}
     <article class="list-row notification-row{% if not item.read %} unread{% endif %}">

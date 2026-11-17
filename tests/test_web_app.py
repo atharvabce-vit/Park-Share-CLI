@@ -1728,6 +1728,24 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIsNone(auth_module.authenticate("password_change_driver", "securepass1"))
         self.assertNotIn("old-token-hash", data_store.password_reset_tokens)
 
+    def test_notifications_can_be_filtered_by_read_status(self):
+        self.register(self.client, "notification_filter_driver")
+        data_store.add_notification("notification_filter_driver", "Unread notice.")
+        data_store.add_notification("notification_filter_driver", "Read notice.")
+        next(
+            item for item in data_store.notifications
+            if item["text"] == "Read notice."
+        )["read"] = True
+        data_store.persist()
+
+        unread = self.client.get("/notifications?filter=unread")
+        self.assertIn(b"Unread notice.", unread.data)
+        self.assertNotIn(b"Read notice.", unread.data)
+        read = self.client.get("/notifications?filter=read")
+        self.assertNotIn(b"Unread notice.", read.data)
+        self.assertIn(b"Read notice.", read.data)
+        self.assertIn(b'href="/notifications?filter=all"', read.data)
+
     def test_booking_calendar_download_is_private_to_booking_owner(self):
         host = self.app.test_client()
         self.register(host, "calendar_download_host", "Host")
