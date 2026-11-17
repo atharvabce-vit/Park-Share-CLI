@@ -1847,6 +1847,19 @@ class ParkShareWebTests(unittest.TestCase):
         )
         self.assertIn(b"Price: low to high", response.data)
 
+    def test_booking_history_can_be_filtered_by_status(self):
+        self.register(self.client, "booking_status_driver")
+        data_store.spots_db.append(ParkingSpot(1, "Status garage", 45, "host", 1))
+        now = datetime.now()
+        active = Booking(1, 1, "booking_status_driver", 1, 45, now)
+        completed = Booking(2, 1, "booking_status_driver", 1, 45, now)
+        completed.status = "Completed"
+        data_store.bookings_db.extend([active, completed])
+        response = self.client.get("/bookings?status=completed")
+        self.assertIn(b"BOOKING #2", response.data)
+        self.assertNotIn(b"BOOKING #1", response.data)
+        self.assertIn(b">Completed</option>", response.data)
+
     def test_invalid_spot_sort_falls_back_to_recommended(self):
         response = self.client.get("/spots?sort=unknown")
         self.assertEqual(response.status_code, 200)

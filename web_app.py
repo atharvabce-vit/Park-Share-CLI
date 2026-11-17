@@ -1358,6 +1358,15 @@ def create_app(test_config=None):
         else:
             mine = [booking for booking in data_store.bookings_db
                     if data_store.find_spot(booking.spot_id).host_username == user.username]
+        status_filter = request.args.get("status", "all")
+        if status_filter not in ("all", "active", "completed", "cancelled"):
+            status_filter = "all"
+        if status_filter == "active":
+            mine = [booking for booking in mine if booking.status in ("Active", "Checked In")]
+        elif status_filter == "completed":
+            mine = [booking for booking in mine if booking.status == "Completed"]
+        elif status_filter == "cancelled":
+            mine = [booking for booking in mine if booking.status == "Cancelled"]
         now = datetime.now()
         checkin_allowed = {
             booking.booking_id for booking in mine
@@ -1377,6 +1386,7 @@ def create_app(test_config=None):
             "bookings.html", bookings=mine, checkin_allowed=checkin_allowed,
             reviewed_bookings=reviewed_bookings,
             pending_reschedules=pending_reschedules,
+            status_filter=status_filter,
             now=now,
             minimum_start=now.strftime("%Y-%m-%dT%H:%M"),
         )

@@ -2,6 +2,17 @@
 {% block title %}Bookings{% endblock %}
 {% block content %}
 <section class="page-heading"><div><span class="eyebrow">YOUR PARKSHARE HISTORY</span><h1>Bookings.</h1><p>Every stay, all in one place.{% if not signed_in_user %} Guest bookings are available only in this browser session.{% endif %}</p></div></section>
+<form class="filter-options" method="get" action="{{ url_for('bookings') }}">
+  <label class="field">Show bookings
+    <select name="status">
+      <option value="all" {% if status_filter == "all" %}selected{% endif %}>All</option>
+      <option value="active" {% if status_filter == "active" %}selected{% endif %}>Active</option>
+      <option value="completed" {% if status_filter == "completed" %}selected{% endif %}>Completed</option>
+      <option value="cancelled" {% if status_filter == "cancelled" %}selected{% endif %}>Cancelled</option>
+    </select>
+  </label>
+  <button class="button secondary" type="submit">Filter</button>
+</form>
 {% if bookings %}
 <section class="booking-list">
   {% for booking in bookings|reverse %}
