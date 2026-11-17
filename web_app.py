@@ -1313,17 +1313,25 @@ def create_app(test_config=None):
         parking_instructions = request.form.get("parking_instructions", "").strip()
         try:
             price = float(request.form.get("price_per_hour", ""))
+            slots = int(request.form.get("total_slots", str(spot.total_slots)))
             latitude, longitude = _coordinates(
                 request.form.get("latitude", ""), request.form.get("longitude", "")
             )
         except ValueError:
-            flash("Enter a valid hourly price and map location.", "error")
+            flash("Enter a valid hourly price, space count, and map location.", "error")
             return redirect(url_for("host_spots"))
         types = [item for item in VEHICLE_TYPES if item in request.form.getlist("vehicle_types")]
-        if (not location or not math.isfinite(price) or price < 1 or not types
+        if (not location or not math.isfinite(price) or price < 1
+                or slots < 1 or slots > 100 or not types
                 or len(parking_instructions) > 1000):
-            flash("Enter a location, valid price, vehicle type, and instructions under 1000 characters.", "error")
+            flash("Enter a location, valid price, 1–100 spaces, vehicle type, and instructions under 1000 characters.", "error")
             return redirect(url_for("host_spots"))
+        with booking_lock:
+            if slots < len(data_store.occupied_slots(spot_id)):
+                flash("Space count cannot be lower than the number of reserved spaces.", "error")
+                return redirect(url_for("host_spots"))
+            spot.total_slots = slots
+            data_store.refresh_availability(spot)
         upload = request.files.get("photo")
         try:
             photo = _save_photo(upload) if upload and upload.filename else None

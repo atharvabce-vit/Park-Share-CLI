@@ -1962,6 +1962,36 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(spot.photo, "")
         self.assertFalse(os.path.exists(photo_path))
 
+    def test_host_can_update_capacity_without_overbooking_reserved_spaces(self):
+        host = self.app.test_client()
+        self.register(host, "capacity_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Capacity garage",
+            "price_per_hour": "50", "total_slots": "2",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        spot = data_store.spots_db[0]
+        now = datetime.now()
+        for booking_id, slot_number in ((1, 1), (2, 2)):
+            booking = Booking(booking_id, spot.spot_id, "driver", 2, 50, now)
+            booking.slot_number = slot_number
+            data_store.bookings_db.append(booking)
+        page = host.get("/host/spots")
+        response = host.post(
+            "/host/spots/" + str(spot.spot_id) + "/edit",
+            data={
+                "csrf_token": self.csrf(page), "location": spot.location,
+                "price_per_hour": "50", "total_slots": "1",
+                "latitude": "19.0760", "longitude": "72.8777",
+                "vehicle_types": ["Car"],
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"cannot be lower than the number of reserved spaces", response.data)
+        self.assertEqual(spot.total_slots, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
