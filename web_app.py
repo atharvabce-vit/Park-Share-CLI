@@ -913,7 +913,8 @@ def create_app(test_config=None):
                 continue
             if vehicle_type != "Any" and vehicle_type not in spot.vehicle_types:
                 continue
-            if keyword and keyword not in spot.location.lower():
+            searchable_text = (spot.location + " " + spot.description).casefold()
+            if keyword and keyword.casefold() not in searchable_text:
                 continue
             if near_latitude is not None:
                 if spot.latitude is None or spot.longitude is None:

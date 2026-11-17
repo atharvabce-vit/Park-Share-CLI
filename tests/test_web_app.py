@@ -1714,6 +1714,21 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertNotIn(b"Budget parking", response.data)
         self.assertIn(b'value="50"', response.data)
 
+    def test_spot_search_matches_listing_descriptions(self):
+        host = self.app.test_client()
+        self.register(host, "description_search_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Central parking",
+            "description": "Covered space with an EV charger",
+            "price_per_hour": "45", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+        })
+        response = self.client.get("/spots?location=EV+charger")
+        self.assertIn(b"Central parking", response.data)
+        self.assertIn(b"Covered space with an EV charger", response.data)
+
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
         captured = []
