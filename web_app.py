@@ -827,11 +827,17 @@ def create_app(test_config=None):
         if user.role == "Driver":
             active = [booking for booking in data_store.active_bookings()
                       if booking.driver_username == user.username]
+        upcoming = sorted(
+            (booking for booking in active
+             if booking.start_time and booking.start_time > datetime.now()),
+            key=lambda booking: booking.start_time,
+        )[:3]
         my_spots = [spot for spot in data_store.spots_db
                     if spot.host_username == user.username and spot.is_active]
         return render_template(
             "dashboard.html",
             active_bookings=active,
+            upcoming_bookings=upcoming,
             my_spots=my_spots,
             available_spots=[spot for spot in data_store.spots_db
                              if spot.is_active and spot.has_slots()],

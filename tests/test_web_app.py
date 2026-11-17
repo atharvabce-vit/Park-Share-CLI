@@ -120,6 +120,27 @@ class ParkShareWebTests(unittest.TestCase):
         )
         self.assertEqual(limited.status_code, 429)
 
+    def test_dashboard_highlights_the_next_three_future_bookings(self):
+        self.register(self.client, "dashboard_upcoming_driver")
+        spot = ParkingSpot(
+            1, "Upcoming garage", 45, "host", 1,
+            latitude=19.076, longitude=72.8777,
+        )
+        data_store.spots_db.append(spot)
+        now = datetime.now()
+        for booking_id, days in ((1, 3), (2, 1), (3, 5), (4, 7)):
+            data_store.bookings_db.append(Booking(
+                booking_id, 1, "dashboard_upcoming_driver", 1, 45,
+                now, start_time=now + timedelta(days=days),
+            ))
+        response = self.client.get("/dashboard")
+        self.assertIn(b"Your next bookings", response.data)
+        self.assertEqual(response.data.count(b"Add to calendar"), 3)
+        self.assertLess(
+            response.data.index(b"Booking #2"),
+            response.data.index(b"Booking #1"),
+        )
+
     def test_driver_can_save_remove_and_reload_favorite_listings(self):
         host = self.app.test_client()
         self.register(host, "favorite_host", "Host")
