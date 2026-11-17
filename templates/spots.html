@@ -26,7 +26,7 @@
     <p class="map-status" data-map-status="nearby-map" aria-live="polite">{% if filters.near_lat %}Click the map to move the search pin. Amber rings are demo coverage pins, not actual parking spaces.{% else %}Choose a point to see listings nearby.{% endif %}</p>
     <button class="button primary" type="submit">Search this area</button>
   </div>
-  <div class="filter-options"><label><input type="checkbox" name="covered" value="1" {% if filters.covered %}checked{% endif %}> Covered</label><label><input type="checkbox" name="ev_charging" value="1" {% if filters.ev_charging %}checked{% endif %}> EV charging</label><button class="button primary" type="submit">Apply filters</button></div>
+  <div class="filter-options"><label><input type="checkbox" name="covered" value="1" {% if filters.covered %}checked{% endif %}> Covered</label><label><input type="checkbox" name="ev_charging" value="1" {% if filters.ev_charging %}checked{% endif %}> EV charging</label><button class="button primary" type="submit">Apply filters</button><a class="button ghost" href="{{ url_for('spots') }}">Clear filters</a></div>
 </form>
 {% if spots %}
 <section class="spot-grid">

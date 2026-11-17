@@ -1790,6 +1790,7 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'<option value="recommended" selected>', response.data)
         self.assertNotIn(b'<option value="unknown" selected>', response.data)
+        self.assertIn(b"Clear filters", response.data)
 
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
