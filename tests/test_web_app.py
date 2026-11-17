@@ -1729,6 +1729,12 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertIn(b"Central parking", response.data)
         self.assertIn(b"Covered space with an EV charger", response.data)
 
+    def test_invalid_spot_sort_falls_back_to_recommended(self):
+        response = self.client.get("/spots?sort=unknown")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<option value="recommended" selected>', response.data)
+        self.assertNotIn(b'<option value="unknown" selected>', response.data)
+
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
         captured = []

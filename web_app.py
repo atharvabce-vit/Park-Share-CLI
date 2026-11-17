@@ -842,6 +842,8 @@ def create_app(test_config=None):
         if vehicle_type not in VEHICLE_TYPES and vehicle_type != "Any":
             vehicle_type = user.vehicle_type or "Any" if user else "Any"
         sort_by = request.args.get("sort", "recommended")
+        if sort_by not in ("recommended", "price", "rating", "availability"):
+            sort_by = "recommended"
         requested_hours = request.args.get("hours", "1")
         try:
             requested_hours = int(requested_hours)
@@ -998,13 +1000,21 @@ def create_app(test_config=None):
                 for facility in provider_facilities
             )
         if sort_by == "price":
-            results.sort(key=lambda item: item.price_per_hour)
+            results.sort(key=lambda item: (item.price_per_hour, item.location.casefold()))
         elif sort_by == "rating":
-            results.sort(key=lambda item: item.average_rating() or 0, reverse=True)
+            results.sort(
+                key=lambda item: (-(item.average_rating() or 0), item.location.casefold())
+            )
         elif sort_by == "availability":
-            results.sort(key=lambda item: availability[item.spot_id], reverse=True)
+            results.sort(
+                key=lambda item: (-availability[item.spot_id], item.location.casefold())
+            )
         else:
-            results.sort(key=lambda item: recommendation_scores[item.spot_id], reverse=True)
+            results.sort(
+                key=lambda item: (
+                    -recommendation_scores[item.spot_id], item.location.casefold()
+                )
+            )
         host_reviews = {}
         for review in data_store.reviews:
             if not review["visible"]:
