@@ -1634,6 +1634,33 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertFalse(other_items[0]["read"])
         self.assertNotIn(b"Mark all read", response.data)
 
+    def test_password_change_checks_current_password_and_invalidates_reset_tokens(self):
+        self.register(self.client, "password_change_driver")
+        data_store.password_reset_tokens["old-token-hash"] = (
+            "password_change_driver", datetime.now() + timedelta(minutes=10)
+        )
+        page = self.client.get("/profile")
+        denied = self.client.post("/profile/password", data={
+            "csrf_token": self.csrf(page),
+            "current_password": "wrongpass1",
+            "new_password": "newsecure2",
+            "confirm_password": "newsecure2",
+        }, follow_redirects=True)
+        self.assertIn(b"Enter your current password", denied.data)
+        self.assertTrue(auth_module.authenticate("password_change_driver", "securepass1"))
+
+        page = self.client.get("/profile")
+        changed = self.client.post("/profile/password", data={
+            "csrf_token": self.csrf(page),
+            "current_password": "securepass1",
+            "new_password": "newsecure2",
+            "confirm_password": "newsecure2",
+        }, follow_redirects=True)
+        self.assertIn(b"Your password has been changed.", changed.data)
+        self.assertIsNotNone(auth_module.authenticate("password_change_driver", "newsecure2"))
+        self.assertIsNone(auth_module.authenticate("password_change_driver", "securepass1"))
+        self.assertNotIn("old-token-hash", data_store.password_reset_tokens)
+
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
         captured = []

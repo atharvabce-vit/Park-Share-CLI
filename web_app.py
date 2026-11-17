@@ -682,6 +682,30 @@ def create_app(test_config=None):
         flash("Your email notification preferences have been saved.", "success")
         return redirect(url_for("profile"))
 
+    @app.route("/profile/password", methods=["POST"])
+    @login_required
+    def update_password():
+        user = current_user()
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        if auth_module.authenticate(user.username, current_password) is None:
+            flash("Enter your current password to change it.", "error")
+        elif not _valid_password(new_password):
+            flash("New password must be at least 8 characters and include a number.", "error")
+        elif new_password != request.form.get("confirm_password", ""):
+            flash("Your new passwords do not match.", "error")
+        else:
+            user.password = generate_password_hash(new_password)
+            for token_hash, (username, unused_expiry) in list(
+                    data_store.password_reset_tokens.items()):
+                if username == user.username:
+                    del data_store.password_reset_tokens[token_hash]
+            data_store.log_event(user.username + " changed their password")
+            data_store.persist()
+            flash("Your password has been changed.", "success")
+            return redirect(url_for("profile"))
+        return redirect(url_for("profile"))
+
     @app.route("/account/delete", methods=["POST"])
     @login_required
     def delete_account():

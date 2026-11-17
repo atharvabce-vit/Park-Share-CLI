@@ -29,6 +29,18 @@
     <button class="button secondary" type="submit">Save email preferences</button>
   </form>
 </section>
+<section class="form-panel profile-panel">
+  <span class="eyebrow">ACCOUNT SECURITY</span>
+  <h2>Change password</h2>
+  <form method="post" action="{{ url_for('update_password') }}" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="field">Current password<input name="current_password" type="password" autocomplete="current-password" required></label>
+    <label class="field">New password<input name="new_password" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label class="field">Confirm new password<input name="confirm_password" type="password" autocomplete="new-password" minlength="8" required></label>
+    <small class="muted">Use at least 8 characters and include a number.</small>
+    <button class="button secondary" type="submit">Change password</button>
+  </form>
+</section>
 {% if signed_in_user.role == "Host" %}
 <section class="form-panel profile-panel">
   <span class="eyebrow">HOST TRUST</span>
