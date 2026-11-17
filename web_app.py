@@ -1114,8 +1114,18 @@ def create_app(test_config=None):
             if (username, spot.spot_id) in data_store.saved_spots
             and spot.is_active and not spot.is_demo
         ]
-        saved.sort(key=lambda spot: spot.location.casefold())
-        return render_template("favorites.html", spots=saved)
+        sort_by = request.args.get("sort", "location")
+        if sort_by not in ("location", "price", "rating"):
+            sort_by = "location"
+        if sort_by == "price":
+            saved.sort(key=lambda spot: (spot.price_per_hour, spot.location.casefold()))
+        elif sort_by == "rating":
+            saved.sort(
+                key=lambda spot: (-(spot.average_rating() or 0), spot.location.casefold())
+            )
+        else:
+            saved.sort(key=lambda spot: spot.location.casefold())
+        return render_template("favorites.html", spots=saved, sort_by=sort_by)
 
     @app.route("/favorites/<int:spot_id>/toggle", methods=["POST"])
     @role_required("Driver")

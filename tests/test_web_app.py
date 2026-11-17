@@ -1831,6 +1831,22 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertNotIn(b"Lower rated", response.data)
         self.assertIn(b">4+ stars</option>", response.data)
 
+    def test_saved_spots_can_be_sorted_by_price(self):
+        self.register(self.client, "sorted_favorites_driver")
+        cheap = ParkingSpot(1, "Zeta garage", 20, "host", 1)
+        expensive = ParkingSpot(2, "Alpha garage", 70, "host", 1)
+        data_store.spots_db.extend([cheap, expensive])
+        data_store.saved_spots.update({
+            ("sorted_favorites_driver", 1),
+            ("sorted_favorites_driver", 2),
+        })
+        response = self.client.get("/favorites?sort=price")
+        self.assertLess(
+            response.data.index(b"Zeta garage"),
+            response.data.index(b"Alpha garage"),
+        )
+        self.assertIn(b"Price: low to high", response.data)
+
     def test_invalid_spot_sort_falls_back_to_recommended(self):
         response = self.client.get("/spots?sort=unknown")
         self.assertEqual(response.status_code, 200)

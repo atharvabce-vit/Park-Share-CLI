@@ -6,6 +6,16 @@
   <a class="button ghost" href="{{ url_for('spots') }}">Find parking</a>
 </section>
 {% if spots %}
+<form class="filter-options" method="get" action="{{ url_for('favorites') }}">
+  <label class="field">Sort saved spots
+    <select name="sort">
+      <option value="location" {% if sort_by == "location" %}selected{% endif %}>Location</option>
+      <option value="price" {% if sort_by == "price" %}selected{% endif %}>Price: low to high</option>
+      <option value="rating" {% if sort_by == "rating" %}selected{% endif %}>Top rated</option>
+    </select>
+  </label>
+  <button class="button secondary" type="submit">Sort</button>
+</form>
 <section class="spot-grid">
   {% for spot in spots %}
   <article class="spot-card">
