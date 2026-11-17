@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Notifications{% endblock %}
 {% block content %}
-<section class="page-heading"><div><span class="eyebrow">ACCOUNT UPDATES</span><h1>Notifications.</h1><p>Booking activity related to your account.</p></div></section>
+<section class="page-heading">
+  <div><span class="eyebrow">ACCOUNT UPDATES</span><h1>Notifications.</h1><p>Booking activity related to your account.</p></div>
+  {% if unread_count %}
+  <form method="post" action="{{ url_for('mark_all_notifications_read') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button secondary" type="submit">Mark all read</button>
+  </form>
+  {% endif %}
+</section>
 <section class="simple-list">
   {% for item in notifications %}
     <article class="list-row notification-row{% if not item.read %} unread{% endif %}">

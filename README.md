@@ -18,7 +18,7 @@ ParkShare connects drivers looking for parking with hosts who have a space to sh
 - **Host availability calendar:** Block future date/time ranges for personal use or maintenance; blocked periods are excluded from search and rejected by booking validation.
 - **Private parking instructions:** Hosts can add arrival and access details that appear only to the driver on the authorized booking page, never on public listing cards.
 - **Account tools:** Edit your profile, delete your account (after active bookings are resolved), and request a time-limited password-reset link by email.
-- **Notifications:** Hosts receive in-app updates when drivers book, cancel, or complete a stay.
+- **Notifications:** Hosts receive in-app updates when drivers book, cancel, or complete a stay; mark updates read individually or all at once.
 - **Email preferences:** Choose email categories for booking updates, reminders, and saved-spot alerts; in-app notifications are unaffected.
 - **Activity feed:** Review recent ParkShare events.
 - **Admin audit history:** Administrators can review a timestamped history of moderation actions and their recorded notes.

@@ -744,7 +744,21 @@ def create_app(test_config=None):
     def notifications_page():
         user = current_user()
         mine = [item for item in data_store.notifications if item["username"] == user.username]
-        return render_template("notifications.html", notifications=mine)
+        unread_count = sum(1 for item in mine if not item["read"])
+        return render_template(
+            "notifications.html", notifications=mine, unread_count=unread_count
+        )
+
+    @app.route("/notifications/read-all", methods=["POST"])
+    @login_required
+    def mark_all_notifications_read():
+        username = current_user().username
+        for item in data_store.notifications:
+            if item["username"] == username:
+                item["read"] = True
+        data_store.persist()
+        flash("All notifications marked as read.", "success")
+        return redirect(url_for("notifications_page"))
 
     @app.route("/notifications/<int:notification_id>/read", methods=["POST"])
     @login_required

@@ -1602,6 +1602,38 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertNotIn("profile_driver", data_store.users_db)
         self.assertEqual(data_store.saved_spots, set())
 
+    def test_mark_all_notifications_read_only_updates_current_users_notifications(self):
+        self.register(self.client, "notification_owner")
+        other_client = self.app.test_client()
+        self.register(other_client, "notification_other")
+        data_store.add_notification("notification_owner", "First update.")
+        data_store.add_notification("notification_owner", "Second update.")
+        data_store.add_notification("notification_other", "Other user's update.")
+        data_store.persist()
+
+        page = self.client.get("/notifications")
+        self.assertIn(b"Mark all read", page.data)
+        response = self.client.post(
+            "/notifications/read-all",
+            data={"csrf_token": self.csrf(page)},
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"All notifications marked as read.", response.data)
+        owner_items = [
+            item for item in data_store.notifications
+            if item["username"] == "notification_owner"
+        ]
+        other_items = [
+            item for item in data_store.notifications
+            if item["username"] == "notification_other"
+        ]
+        self.assertEqual(len(owner_items), 2)
+        self.assertTrue(all(item["read"] for item in owner_items))
+        self.assertEqual(len(other_items), 1)
+        self.assertFalse(other_items[0]["read"])
+        self.assertNotIn(b"Mark all read", response.data)
+
     def test_password_reset_uses_one_time_token(self):
         self.register(self.client, "reset_driver")
         captured = []
