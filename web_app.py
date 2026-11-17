@@ -454,6 +454,18 @@ def create_app(test_config=None):
             if not submitted or not expected or not hmac.compare_digest(submitted, expected):
                 abort(400, description="Form expired or invalid. Reload the page and try again.")
 
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(self)")
+        if request.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return response
+
     @app.before_request
     def enforce_login_rate_limit():
         if request.path != url_for("login"):

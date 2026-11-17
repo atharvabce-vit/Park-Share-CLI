@@ -85,6 +85,15 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("bad", data_store.users_db)
 
+    def test_responses_include_browser_security_headers(self):
+        response = self.client.get("/")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(
+            response.headers["Referrer-Policy"], "strict-origin-when-cross-origin"
+        )
+        self.assertEqual(response.headers["Permissions-Policy"], "geolocation=(self)")
+
     def test_driver_can_save_remove_and_reload_favorite_listings(self):
         host = self.app.test_client()
         self.register(host, "favorite_host", "Host")
