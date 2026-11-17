@@ -94,6 +94,17 @@ class ParkShareWebTests(unittest.TestCase):
         )
         self.assertEqual(response.headers["Permissions-Policy"], "geolocation=(self)")
 
+    def test_health_endpoint_checks_sqlite_readiness(self):
+        response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "ok", "storage": "ok"})
+
+    @patch("web_app.data_store.storage_is_ready", return_value=False)
+    def test_health_endpoint_returns_service_unavailable_when_storage_is_down(self, ready):
+        response = self.client.get("/health")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json, {"status": "error", "storage": "unavailable"})
+
     def test_login_throttle_cannot_be_bypassed_with_forwarded_ip_header(self):
         page = self.client.get("/login")
         for attempt in range(5):

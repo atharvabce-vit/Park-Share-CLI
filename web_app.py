@@ -2212,7 +2212,9 @@ def create_app(test_config=None):
 
     @app.route("/health")
     def health():
-        return {"status": "ok"}
+        if not data_store.storage_is_ready():
+            return jsonify({"status": "error", "storage": "unavailable"}), 503
+        return jsonify({"status": "ok", "storage": "ok"})
 
     return app
 

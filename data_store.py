@@ -379,6 +379,19 @@ def configure_storage(path):
         _load()
 
 
+def storage_is_ready():
+    connection = None
+    try:
+        connection = _connect()
+        connection.execute("SELECT 1").fetchone()
+    except sqlite3.Error:
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+    return True
+
+
 def persist():
     with _storage_lock:
         connection = _connect()
