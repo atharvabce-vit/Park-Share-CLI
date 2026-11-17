@@ -1386,6 +1386,10 @@ def create_app(test_config=None):
             mine = [booking for booking in mine if booking.status == "Completed"]
         elif status_filter == "cancelled":
             mine = [booking for booking in mine if booking.status == "Cancelled"]
+        mine.sort(
+            key=lambda booking: booking.start_time or booking.entry_time,
+            reverse=True,
+        )
         now = datetime.now()
         checkin_allowed = {
             booking.booking_id for booking in mine

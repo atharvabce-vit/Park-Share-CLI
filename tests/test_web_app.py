@@ -1875,6 +1875,25 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertNotIn(b"BOOKING #1", response.data)
         self.assertIn(b">Completed</option>", response.data)
 
+    def test_booking_history_is_sorted_by_start_time(self):
+        self.register(self.client, "booking_order_driver")
+        data_store.spots_db.append(ParkingSpot(1, "Order garage", 45, "host", 1))
+        now = datetime.now()
+        newer = Booking(
+            1, 1, "booking_order_driver", 1, 45, now,
+            start_time=now + timedelta(days=4),
+        )
+        older = Booking(
+            2, 1, "booking_order_driver", 1, 45, now,
+            start_time=now + timedelta(days=1),
+        )
+        data_store.bookings_db.extend([newer, older])
+        response = self.client.get("/bookings")
+        self.assertLess(
+            response.data.index(b"BOOKING #1"),
+            response.data.index(b"BOOKING #2"),
+        )
+
     def test_invalid_spot_sort_falls_back_to_recommended(self):
         response = self.client.get("/spots?sort=unknown")
         self.assertEqual(response.status_code, 200)

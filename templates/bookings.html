@@ -15,7 +15,7 @@
 </form>
 {% if bookings %}
 <section class="booking-list">
-  {% for booking in bookings|reverse %}
+  {% for booking in bookings %}
     {% set spot = find_spot(booking.spot_id) %}
     <article class="booking-card">
       <div class="booking-head"><div><span class="step-tag">BOOKING #{{ booking.booking_id }}</span><h2>{{ spot.location }}</h2></div><span class="badge {{ booking.status|lower }}">{{ booking.status }}</span></div>
