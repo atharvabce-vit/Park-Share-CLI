@@ -1871,6 +1871,35 @@ class ParkShareWebTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.temp_dir.name, spot.photo)))
         self.assertIn(b"Image garage", response.data)
 
+    def test_host_can_remove_a_listing_photo(self):
+        host = self.app.test_client()
+        self.register(host, "remove_photo_host", "Host")
+        page = host.get("/host/spots")
+        host.post("/host/spots", data={
+            "csrf_token": self.csrf(page), "location": "Photo garage",
+            "price_per_hour": "50", "total_slots": "1",
+            "latitude": "19.0760", "longitude": "72.8777",
+            "vehicle_types": ["Car"],
+            "photo": (BytesIO(self.png_pixel()), "garage.png"),
+        }, content_type="multipart/form-data")
+        spot = data_store.spots_db[0]
+        photo_path = os.path.join(self.temp_dir.name, spot.photo)
+        self.assertTrue(os.path.isfile(photo_path))
+        page = host.get("/host/spots")
+        response = host.post(
+            "/host/spots/" + str(spot.spot_id) + "/edit",
+            data={
+                "csrf_token": self.csrf(page), "location": spot.location,
+                "price_per_hour": "50", "latitude": "19.0760",
+                "longitude": "72.8777", "vehicle_types": ["Car"],
+                "remove_photo": "on",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Listing details updated", response.data)
+        self.assertEqual(spot.photo, "")
+        self.assertFalse(os.path.exists(photo_path))
+
 
 if __name__ == "__main__":
     unittest.main()

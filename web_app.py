@@ -164,8 +164,11 @@ def _save_photo(upload):
 def _delete_photo(photo):
     if not photo or not photo.startswith("uploads/"):
         return
-    path = (Path(current_app.static_folder) / photo).resolve()
     uploads = Path(current_app.config["UPLOAD_FOLDER"]).resolve()
+    relative = Path(photo)
+    if len(relative.parts) != 2 or relative.parts[0] != "uploads":
+        return
+    path = (uploads / relative.name).resolve()
     if path.parent == uploads and path.is_file():
         path.unlink()
 
@@ -1307,6 +1310,9 @@ def create_app(test_config=None):
         if photo:
             _delete_photo(getattr(spot, "photo", ""))
             spot.photo = photo
+        elif request.form.get("remove_photo") == "on":
+            _delete_photo(getattr(spot, "photo", ""))
+            spot.photo = ""
         spot.latitude = latitude
         spot.longitude = longitude
         if price != previous_price:
