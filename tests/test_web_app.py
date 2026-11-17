@@ -94,6 +94,16 @@ class ParkShareWebTests(unittest.TestCase):
         )
         self.assertEqual(response.headers["Permissions-Policy"], "geolocation=(self)")
 
+    def test_password_visibility_toggle_is_loaded_for_auth_pages(self):
+        response = self.client.get("/login")
+        self.assertIn(b"password-toggle.js", response.data)
+        script = self.client.get("/static/password-toggle.js")
+        self.assertEqual(script.status_code, 200)
+        script_data = script.get_data()
+        script.close()
+        self.assertIn(b'aria-pressed', script_data)
+        self.assertIn(b'input.type = isVisible ? "password" : "text"', script_data)
+
     def test_health_endpoint_checks_sqlite_readiness(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
