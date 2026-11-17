@@ -2126,8 +2126,17 @@ def create_app(test_config=None):
     @app.route("/activity")
     @login_required
     def activity():
-        events = list(reversed(data_store.activity_log[-30:]))
-        return render_template("activity.html", events=events)
+        total_pages = max(1, math.ceil(len(data_store.activity_log) / 30))
+        try:
+            page = int(request.args.get("page", "1"))
+        except ValueError:
+            page = 1
+        page = min(total_pages, max(1, page))
+        start = (page - 1) * 30
+        events = list(reversed(data_store.activity_log))[start:start + 30]
+        return render_template(
+            "activity.html", events=events, page=page, total_pages=total_pages
+        )
 
     @app.route("/admin", methods=["GET", "POST"])
     @login_required

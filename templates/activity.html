@@ -9,4 +9,11 @@
     <div class="empty-state small"><span>◷</span><h2>It's quiet for now</h2><p>Your ParkShare activity will show up here.</p></div>
   {% endfor %}
 </section>
+{% if total_pages > 1 %}
+<nav class="filter-options" aria-label="Activity pages">
+  {% if page > 1 %}<a class="button ghost" href="{{ url_for('activity', page=page - 1) }}">Newer</a>{% endif %}
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}<a class="button ghost" href="{{ url_for('activity', page=page + 1) }}">Older</a>{% endif %}
+</nav>
+{% endif %}
 {% endblock %}

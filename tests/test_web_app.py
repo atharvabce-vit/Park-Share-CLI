@@ -1894,6 +1894,21 @@ class ParkShareWebTests(unittest.TestCase):
             response.data.index(b"BOOKING #2"),
         )
 
+    def test_activity_feed_paginates_older_events(self):
+        self.register(self.client, "activity_page_driver")
+        now = datetime.now()
+        data_store.activity_log.extend(
+            (now + timedelta(seconds=index), "Activity event " + str(index))
+            for index in range(35)
+        )
+        newest = self.client.get("/activity")
+        self.assertIn(b"Activity event 34", newest.data)
+        self.assertNotIn(b"Activity event 0", newest.data)
+        self.assertIn(b"Page 1 of 2", newest.data)
+        older = self.client.get("/activity?page=2")
+        self.assertIn(b"Activity event 0", older.data)
+        self.assertNotIn(b"Activity event 34", older.data)
+
     def test_invalid_spot_sort_falls_back_to_recommended(self):
         response = self.client.get("/spots?sort=unknown")
         self.assertEqual(response.status_code, 200)
