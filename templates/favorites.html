@@ -3,7 +3,7 @@
 {% block content %}
 <section class="page-heading">
   <div><span class="eyebrow">YOUR SHORTLIST</span><h1>Saved parking spots.</h1><p>Keep promising listings handy while you compare options.</p></div>
-  <a class="button ghost" href="{{ url_for('spots') }}">Find parking</a>
+  <div class="hero-actions"><a class="button ghost" href="{{ url_for('spots') }}">Find parking</a>{% if spots %}<form method="post" action="{{ url_for('clear_favorites') }}" onsubmit="return confirm('Remove all saved spots?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button danger-outline" type="submit">Clear all</button></form>{% endif %}</div>
 </section>
 {% if spots %}
 <form class="filter-options" method="get" action="{{ url_for('favorites') }}">

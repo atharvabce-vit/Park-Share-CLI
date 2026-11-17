@@ -1847,6 +1847,21 @@ class ParkShareWebTests(unittest.TestCase):
         )
         self.assertIn(b"Price: low to high", response.data)
 
+    def test_driver_can_clear_only_their_saved_spots(self):
+        self.register(self.client, "clear_favorites_driver")
+        data_store.saved_spots.update({
+            ("clear_favorites_driver", 1),
+            ("another_driver", 2),
+        })
+        page = self.client.get("/favorites")
+        response = self.client.post(
+            "/favorites/clear",
+            data={"csrf_token": self.csrf(page)},
+            follow_redirects=True,
+        )
+        self.assertIn(b"All saved spots have been removed.", response.data)
+        self.assertEqual(data_store.saved_spots, {("another_driver", 2)})
+
     def test_booking_history_can_be_filtered_by_status(self):
         self.register(self.client, "booking_status_driver")
         data_store.spots_db.append(ParkingSpot(1, "Status garage", 45, "host", 1))

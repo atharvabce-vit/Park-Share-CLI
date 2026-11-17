@@ -1127,6 +1127,17 @@ def create_app(test_config=None):
             saved.sort(key=lambda spot: spot.location.casefold())
         return render_template("favorites.html", spots=saved, sort_by=sort_by)
 
+    @app.route("/favorites/clear", methods=["POST"])
+    @role_required("Driver")
+    def clear_favorites():
+        username = current_user().username
+        data_store.saved_spots.difference_update(
+            {favorite for favorite in data_store.saved_spots if favorite[0] == username}
+        )
+        data_store.persist()
+        flash("All saved spots have been removed.", "success")
+        return redirect(url_for("favorites"))
+
     @app.route("/favorites/<int:spot_id>/toggle", methods=["POST"])
     @role_required("Driver")
     def toggle_favorite(spot_id):
