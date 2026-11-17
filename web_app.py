@@ -472,8 +472,7 @@ def create_app(test_config=None):
             return None
         if request.method != "POST":
             return None
-        remote_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
-        key = remote_ip.split(",")[0].strip() or "unknown"
+        key = request.remote_addr or "unknown"
         attempts = data_store.login_attempts.setdefault(key, [])
         now = datetime.now()
         attempts[:] = [stamp for stamp in attempts if now - stamp < timedelta(minutes=15)]
@@ -566,8 +565,7 @@ def create_app(test_config=None):
         if request.method == "POST":
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
-            remote_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
-            key = remote_ip.split(",")[0].strip() or "unknown"
+            key = request.remote_addr or "unknown"
             attempts = data_store.login_attempts.setdefault(key, [])
             now = datetime.now()
             attempts[:] = [stamp for stamp in attempts if now - stamp < timedelta(minutes=15)]

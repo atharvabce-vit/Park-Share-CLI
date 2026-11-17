@@ -94,6 +94,32 @@ class ParkShareWebTests(unittest.TestCase):
         )
         self.assertEqual(response.headers["Permissions-Policy"], "geolocation=(self)")
 
+    def test_login_throttle_cannot_be_bypassed_with_forwarded_ip_header(self):
+        page = self.client.get("/login")
+        for attempt in range(5):
+            page = self.client.get("/login")
+            response = self.client.post(
+                "/login",
+                data={
+                    "csrf_token": self.csrf(page),
+                    "username": "missing_user",
+                    "password": "wrongpass1",
+                },
+                headers={"X-Forwarded-For": "203.0.113." + str(attempt + 1)},
+            )
+            self.assertEqual(response.status_code, 200)
+        page = self.client.get("/login")
+        limited = self.client.post(
+            "/login",
+            data={
+                "csrf_token": self.csrf(page),
+                "username": "missing_user",
+                "password": "wrongpass1",
+            },
+            headers={"X-Forwarded-For": "198.51.100.10"},
+        )
+        self.assertEqual(limited.status_code, 429)
+
     def test_driver_can_save_remove_and_reload_favorite_listings(self):
         host = self.app.test_client()
         self.register(host, "favorite_host", "Host")
